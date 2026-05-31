@@ -17,8 +17,10 @@ import TelegramPanel from "@/components/TelegramPanel";
 import LogPanel from "@/components/LogPanel";
 import KisSettingsModal from "@/components/KisSettingsModal";
 import BacktestPanel from "@/components/BacktestPanel";
+import ScreenerPanel from "@/components/ScreenerPanel";
+import { useRealtimeSignal } from "@/hooks/useRealtime";
 
-type RightTab = "strategy" | "telegram" | "log" | "backtest";
+type RightTab = "strategy" | "backtest" | "screener" | "telegram" | "log";
 
 export default function Dashboard() {
   const { user, loading, isAuthenticated } = useAuth();
@@ -27,6 +29,24 @@ export default function Dashboard() {
   const [rightTab, setRightTab] = useState<RightTab>("strategy");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [signalBanner, setSignalBanner] = useState<{ stockCode: string; stockName: string; action: string; strategy: string } | null>(null);
+
+  // Listen for realtime trading signals
+  useRealtimeSignal((signal) => {
+    setSignalBanner(signal);
+    toast((
+      <div className="flex flex-col gap-0.5">
+        <div className="font-semibold text-xs">
+          {signal.action === "BUY" ? "매수" : "매도"} 신호 발생
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {signal.stockName} ({signal.stockCode}) · {signal.strategy}
+        </div>
+      </div>
+    ), { duration: 6000 });
+    // Auto-hide banner after 10s
+    setTimeout(() => setSignalBanner(null), 10000);
+  });
 
   const { data: kisSettings } = trpc.kis.getSettings.useQuery(
     undefined,
@@ -78,6 +98,21 @@ export default function Dashboard() {
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
+      {/* Signal Banner */}
+      {signalBanner && (
+        <div className={`flex items-center justify-between px-4 py-1.5 text-xs font-medium shrink-0 ${
+          signalBanner.action === "BUY" ? "bg-bull/20 text-bull border-b border-bull/30" : "bg-bear/20 text-bear border-b border-bear/30"
+        }`}>
+          <div className="flex items-center gap-2">
+            <Zap size={12} className="animate-pulse" />
+            <span>{signalBanner.action === "BUY" ? "매수" : "매도"} 신호</span>
+            <span className="font-bold">{signalBanner.stockName} ({signalBanner.stockCode})</span>
+            <span className="text-muted-foreground">· {signalBanner.strategy}</span>
+          </div>
+          <button onClick={() => setSignalBanner(null)} className="opacity-60 hover:opacity-100 text-lg leading-none">×</button>
+        </div>
+      )}
+
       {/* Top Header */}
       <header className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-card shrink-0">
         <div className="flex items-center gap-3">
@@ -207,6 +242,7 @@ export default function Dashboard() {
             {([
               { id: "strategy" as RightTab, icon: Zap, label: "전략" },
               { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트" },
+              { id: "screener" as RightTab, icon: Activity, label: "스크리너" },
               { id: "telegram" as RightTab, icon: MessageSquare, label: "알림" },
               { id: "log" as RightTab, icon: FileText, label: "로그" },
             ] as const).map(({ id, icon: Icon, label }) => (
@@ -240,6 +276,11 @@ export default function Dashboard() {
               </div>
             )}
             {rightTab === "log" && <LogPanel />}
+            {rightTab === "screener" && (
+              <ScreenerPanel
+                onSelectStock={(code, name) => setSelectedStock({ code, name: name || code })}
+              />
+            )}
           </div>
         </div>
       </div>

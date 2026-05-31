@@ -1,6 +1,6 @@
 import { eq, desc, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, kisSettings, watchlist, strategyConfigs, autoTraderConfig, orders, autoTraderLogs, telegramSettings } from "../drizzle/schema";
+import { InsertUser, users, kisSettings, watchlist, strategyConfigs, autoTraderConfig, orders, autoTraderLogs, telegramSettings, screenerResults, backtestResults } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -111,4 +111,130 @@ export async function getTelegramSettings(userId: number) {
   if (!db) return null;
   const rows = await db.select().from(telegramSettings).where(eq(telegramSettings.userId, userId)).limit(1);
   return rows[0] || null;
+}
+
+// ─── Screener Results ─────────────────────────────────────────────────────────
+
+export async function getScreenerResults(userId: number, date?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const today = date ?? new Date().toISOString().slice(0, 10);
+  return db.select().from(screenerResults)
+    .where(and(eq(screenerResults.userId, userId), eq(screenerResults.runDate, today)))
+    .orderBy(desc(screenerResults.createdAt));
+}
+
+export async function saveScreenerResult(data: {
+  userId: number;
+  runDate: string;
+  stockCode: string;
+  stockName?: string;
+  strategyId: string;
+  strategyName?: string;
+  signal: "BUY" | "SELL" | "HOLD";
+  strength?: number;
+  reason?: string;
+  priceAtScan?: number;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(screenerResults).values({
+    userId: data.userId,
+    runDate: data.runDate,
+    stockCode: data.stockCode,
+    stockName: data.stockName,
+    strategyId: data.strategyId,
+    strategyName: data.strategyName,
+    signal: data.signal,
+    strength: data.strength?.toFixed(4) ?? "0",
+    reason: data.reason,
+    priceAtScan: data.priceAtScan?.toFixed(2),
+    addedToWatchlist: false,
+  });
+}
+
+export async function markScreenerAddedToWatchlist(id: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(screenerResults).set({ addedToWatchlist: true }).where(eq(screenerResults.id, id));
+}
+
+// ─── Backtest Results ─────────────────────────────────────────────────────────
+
+export async function saveBacktestResult(data: {
+  userId: number;
+  batchId: string;
+  stockCode: string;
+  strategyId: string;
+  strategyName?: string;
+  period?: string;
+  initialCapital: number;
+  finalCapital: number;
+  totalReturn: number;
+  annualizedReturn: number;
+  maxDrawdown: number;
+  sharpeRatio: number;
+  winRate: number;
+  totalTrades: number;
+  winTrades: number;
+  lossTrades: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
+  resultJson?: unknown;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(backtestResults).values({
+    userId: data.userId,
+    batchId: data.batchId,
+    stockCode: data.stockCode,
+    strategyId: data.strategyId,
+    strategyName: data.strategyName,
+    period: data.period ?? "D",
+    initialCapital: data.initialCapital.toFixed(2),
+    finalCapital: data.finalCapital.toFixed(2),
+    totalReturn: data.totalReturn.toFixed(4),
+    annualizedReturn: data.annualizedReturn.toFixed(4),
+    maxDrawdown: data.maxDrawdown.toFixed(4),
+    sharpeRatio: data.sharpeRatio.toFixed(4),
+    winRate: data.winRate.toFixed(4),
+    totalTrades: data.totalTrades,
+    winTrades: data.winTrades,
+    lossTrades: data.lossTrades,
+    stopLossPct: (data.stopLossPct ?? 0).toFixed(2),
+    takeProfitPct: (data.takeProfitPct ?? 0).toFixed(2),
+    resultJson: data.resultJson ?? null,
+  });
+}
+
+export async function getBacktestResultsByBatch(batchId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(backtestResults)
+    .where(eq(backtestResults.batchId, batchId))
+    .orderBy(desc(backtestResults.totalReturn));
+}
+
+export async function getRecentBacktestBatches(userId: number, limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  // Get distinct batchIds ordered by most recent
+  const rows = await db.select({
+    batchId: backtestResults.batchId,
+    stockCode: backtestResults.stockCode,
+    createdAt: backtestResults.createdAt,
+  }).from(backtestResults)
+    .where(eq(backtestResults.userId, userId))
+    .orderBy(desc(backtestResults.createdAt))
+    .limit(limit * 10); // over-fetch to deduplicate
+  const seen = new Set<string>();
+  const unique: typeof rows = [];
+  for (const row of rows) {
+    if (row.batchId && !seen.has(row.batchId)) {
+      seen.add(row.batchId);
+      unique.push(row);
+      if (unique.length >= limit) break;
+    }
+  }
+  return unique;
 }

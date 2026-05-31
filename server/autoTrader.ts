@@ -3,7 +3,7 @@
  * Cycle: Pre-market stock selection → Intraday signal detection → Auto order execution
  */
 
-import { getDb } from "./db";
+import { getDb, saveScreenerResult } from "./db";
 import {
   autoTraderConfig,
   autoTraderLogs,
@@ -240,12 +240,29 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
   const tradingParams = (tradingConfig.params as Record<string, number | string | boolean>) || tradingStrategy.meta.defaultParams;
   const maxPositions = config.maxPositions || 5;
   const maxOrderAmount = Number(config.maxOrderAmount) || 1_000_000;
+  const today = new Date().toISOString().slice(0, 10);
 
   for (const result of selected.slice(0, maxPositions)) {
     const candidate = candidates.find(c => c.code === result.stockCode);
     if (!candidate) continue;
 
     const signal = tradingStrategy.evaluate(candidate.ohlcv, tradingParams);
+    const lastBar = candidate.ohlcv[candidate.ohlcv.length - 1];
+    const stockItem = watchlistItems.find(w => w.stockCode === result.stockCode);
+
+    // Save screener result to DB
+    await saveScreenerResult({
+      userId,
+      runDate: today,
+      stockCode: result.stockCode,
+      stockName: stockItem?.stockName || result.stockCode,
+      strategyId: tradingConfig.strategyId,
+      strategyName: tradingStrategy.meta.name,
+      signal: signal.signal,
+      strength: signal.strength,
+      reason: signal.reason,
+      priceAtScan: lastBar?.close,
+    }).catch(() => {}); // non-blocking
 
     if (signal.signal === "HOLD") continue;
 

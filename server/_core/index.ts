@@ -10,6 +10,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
 import { heartbeatHandler } from "../autoTrader";
+import { setupRealtimeServer } from "../realtime";
 import { getDb } from "../db";
 import { autoTraderConfig } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -41,6 +42,8 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  // ─── Realtime WebSocket (Socket.IO) ─────────────────────────────────────────
+  setupRealtimeServer(server);
   // ─── Heartbeat: Auto-trading cycle (every 5 min during market hours) ───────
   app.post("/api/scheduled/auto-trade", async (req, res) => {
     try {

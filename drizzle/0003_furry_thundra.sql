@@ -1,0 +1,41 @@
+CREATE TABLE `backtest_results` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`batchId` varchar(36),
+	`stockCode` varchar(20) NOT NULL,
+	`strategyId` varchar(50) NOT NULL,
+	`strategyName` varchar(100),
+	`period` varchar(10) DEFAULT 'D',
+	`initialCapital` decimal(15,2),
+	`finalCapital` decimal(15,2),
+	`totalReturn` decimal(10,4),
+	`annualizedReturn` decimal(10,4),
+	`maxDrawdown` decimal(10,4),
+	`sharpeRatio` decimal(10,4),
+	`winRate` decimal(10,4),
+	`totalTrades` int DEFAULT 0,
+	`winTrades` int DEFAULT 0,
+	`lossTrades` int DEFAULT 0,
+	`stopLossPct` decimal(5,2) DEFAULT '0',
+	`takeProfitPct` decimal(5,2) DEFAULT '0',
+	`resultJson` json,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `backtest_results_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `screener_results` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int NOT NULL,
+	`runDate` varchar(10) NOT NULL,
+	`stockCode` varchar(20) NOT NULL,
+	`stockName` varchar(100),
+	`strategyId` varchar(50) NOT NULL,
+	`strategyName` varchar(100),
+	`signal` enum('BUY','SELL','HOLD') NOT NULL,
+	`strength` decimal(5,4) DEFAULT '0',
+	`reason` text,
+	`priceAtScan` decimal(15,2),
+	`addedToWatchlist` boolean NOT NULL DEFAULT false,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `screener_results_id` PRIMARY KEY(`id`)
+);

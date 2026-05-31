@@ -22,6 +22,13 @@
       "when": 1780186571739,
       "tag": "0002_brief_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1780194096180,
+      "tag": "0003_furry_thundra",
+      "breakpoints": true
     }
   ]
 }

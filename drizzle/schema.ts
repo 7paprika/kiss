@@ -142,3 +142,49 @@ export const telegramSettings = mysqlTable("telegram_settings", {
 });
 
 export type TelegramSettings = typeof telegramSettings.$inferSelect;
+
+// 종목 스크리너 결과 (자동매매 사이클에서 선정된 종목 저장)
+export const screenerResults = mysqlTable("screener_results", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  runDate: varchar("runDate", { length: 10 }).notNull(), // YYYY-MM-DD
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  stockName: varchar("stockName", { length: 100 }),
+  strategyId: varchar("strategyId", { length: 50 }).notNull(),
+  strategyName: varchar("strategyName", { length: 100 }),
+  signal: mysqlEnum("signal", ["BUY", "SELL", "HOLD"]).notNull(),
+  strength: decimal("strength", { precision: 5, scale: 4 }).default("0"), // 0~1
+  reason: text("reason"),
+  priceAtScan: decimal("priceAtScan", { precision: 15, scale: 2 }),
+  addedToWatchlist: boolean("addedToWatchlist").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ScreenerResult = typeof screenerResults.$inferSelect;
+
+// 백테스트 결과 저장 (다중 전략 비교용)
+export const backtestResults = mysqlTable("backtest_results", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  batchId: varchar("batchId", { length: 36 }), // UUID - 비교 그룹
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  strategyId: varchar("strategyId", { length: 50 }).notNull(),
+  strategyName: varchar("strategyName", { length: 100 }),
+  period: varchar("period", { length: 10 }).default("D"),
+  initialCapital: decimal("initialCapital", { precision: 15, scale: 2 }),
+  finalCapital: decimal("finalCapital", { precision: 15, scale: 2 }),
+  totalReturn: decimal("totalReturn", { precision: 10, scale: 4 }),
+  annualizedReturn: decimal("annualizedReturn", { precision: 10, scale: 4 }),
+  maxDrawdown: decimal("maxDrawdown", { precision: 10, scale: 4 }),
+  sharpeRatio: decimal("sharpeRatio", { precision: 10, scale: 4 }),
+  winRate: decimal("winRate", { precision: 10, scale: 4 }),
+  totalTrades: int("totalTrades").default(0),
+  winTrades: int("winTrades").default(0),
+  lossTrades: int("lossTrades").default(0),
+  stopLossPct: decimal("stopLossPct", { precision: 5, scale: 2 }).default("0"),
+  takeProfitPct: decimal("takeProfitPct", { precision: 5, scale: 2 }).default("0"),
+  resultJson: json("resultJson"), // 전체 BacktestResult JSON
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BacktestResult = typeof backtestResults.$inferSelect;

@@ -3,14 +3,15 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
-import { getDb } from "./db";
+import { getDb, getScreenerResults, saveScreenerResult, markScreenerAddedToWatchlist, saveBacktestResult, getBacktestResultsByBatch, getRecentBacktestBatches } from "./db";
 import {
   kisSettings, watchlist, strategyConfigs, autoTraderConfig,
   orders, autoTraderLogs, telegramSettings,
 } from "../drizzle/schema";
 import { encrypt, decrypt } from "./crypto";
 import { KisApiClient, setKisClient } from "./kisApi";
-import { getAllStrategyMeta } from "./strategies/index";
+import { getAllStrategyMeta, getTradingStrategy as getTradingStrategyById } from "./strategies/index";
+import { nanoid } from "nanoid";
 import { runBacktest } from "./backtest";
 import { sendTelegramMessage, testTelegramConnection } from "./telegram";
 import { initKisClientForUser } from "./autoTrader";
@@ -476,6 +477,86 @@ const backtestRouter = router({
 
     return result;
   }),
+
+  // Compare all trading strategies on one stock
+  compare: protectedProcedure.input(z.object({
+    stockCode: z.string().min(1),
+    period: z.enum(["D", "W", "M"]).default("D"),
+    initialCapital: z.number().min(100_000).default(10_000_000),
+    stopLossPct: z.number().min(0).max(50).default(0),
+    takeProfitPct: z.number().min(0).max(100).default(0),
+    strategyIds: z.array(z.string()).optional(),
+  })).mutation(async ({ ctx, input }) => {
+    if (!checkRateLimit(`backtest:${ctx.user.id}`, 3, 60_000)) {
+      throw new Error("비교 백테스트 요청이 너무 많습니다. 1분 후 다시 시도해주세요.");
+    }
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    const ohlcv = await client.getOHLCV(input.stockCode, input.period);
+    if (ohlcv.length < 60) throw new Error("백테스트에 필요한 데이터가 부족합니다 (최소 60바 필요)");
+    const allMeta = getAllStrategyMeta().filter(m => m.type === "trading");
+    const targetIds = input.strategyIds?.length ? input.strategyIds : allMeta.map(m => m.id);
+    const batchId = nanoid();
+    const results: unknown[] = [];
+    for (const strategyId of targetIds) {
+      try {
+        const result = runBacktest({ strategyId, ohlcv, stockCode: input.stockCode, initialCapital: input.initialCapital, stopLossPct: input.stopLossPct, takeProfitPct: input.takeProfitPct });
+        results.push(result);
+        saveBacktestResult({ userId: ctx.user.id, batchId, stockCode: input.stockCode, strategyId, strategyName: result.strategyName, period: input.period, initialCapital: result.initialCapital, finalCapital: result.finalCapital, totalReturn: result.totalReturn, annualizedReturn: result.annualizedReturn, maxDrawdown: result.maxDrawdown, sharpeRatio: result.sharpeRatio, winRate: result.winRate, totalTrades: result.totalTrades, winTrades: result.winTrades, lossTrades: result.lossTrades, stopLossPct: input.stopLossPct, takeProfitPct: input.takeProfitPct, resultJson: result }).catch(() => {});
+      } catch (err) { results.push({ strategyId, strategyName: strategyId, error: String(err) }); }
+    }
+    return { batchId, results, stockCode: input.stockCode };
+  }),
+
+  getRecentBatches: protectedProcedure.query(async ({ ctx }) => getRecentBacktestBatches(ctx.user.id)),
+  getHistory: protectedProcedure.input(z.object({ batchId: z.string() })).query(async ({ input }) => getBacktestResultsByBatch(input.batchId)),
+});
+
+// ─── Screener Router ─────────────────────────────────────────────────────────────────────────────────────
+const screenerRouter = router({
+  getToday: protectedProcedure.input(z.object({ date: z.string().optional() })).query(async ({ ctx, input }) => {
+    return getScreenerResults(ctx.user.id, input.date);
+  }),
+
+  addToWatchlist: protectedProcedure.input(z.object({
+    screenerResultId: z.number(),
+    stockCode: z.string(),
+    stockName: z.string().optional(),
+  })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("DB 연결 실패");
+    const existing = await db.select().from(watchlist).where(and(eq(watchlist.userId, ctx.user.id), eq(watchlist.stockCode, input.stockCode))).limit(1);
+    if (!existing.length) {
+      const maxOrder = await db.select().from(watchlist).where(eq(watchlist.userId, ctx.user.id)).orderBy(desc(watchlist.sortOrder)).limit(1);
+      const nextOrder = (maxOrder[0]?.sortOrder ?? 0) + 1;
+      await db.insert(watchlist).values({ userId: ctx.user.id, stockCode: input.stockCode, stockName: input.stockName || input.stockCode, sortOrder: nextOrder, isAutoTrading: false });
+    }
+    await markScreenerAddedToWatchlist(input.screenerResultId);
+    return { success: true };
+  }),
+
+  runManual: protectedProcedure.input(z.object({
+    stockCodes: z.array(z.string()).min(1).max(20),
+    strategyId: z.string(),
+  })).mutation(async ({ ctx, input }) => {
+    if (!checkRateLimit(`screener:${ctx.user.id}`, 5, 60_000)) throw new Error("스크리너 요청이 너무 많습니다. 1분 후 다시 시도해주세요.");
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    const strategy = getTradingStrategyById(input.strategyId);
+    if (!strategy) throw new Error("전략을 찾을 수 없습니다");
+    const today = new Date().toISOString().slice(0, 10);
+    const results = [];
+    for (const code of input.stockCodes) {
+      try {
+        const ohlcv = await client.getOHLCV(code, "D");
+        const signal = strategy.evaluate(ohlcv, strategy.meta.defaultParams);
+        const lastBar = ohlcv[ohlcv.length - 1];
+        results.push({ stockCode: code, signal: signal.signal, strength: signal.strength, reason: signal.reason, priceAtScan: lastBar?.close });
+        saveScreenerResult({ userId: ctx.user.id, runDate: today, stockCode: code, strategyId: input.strategyId, strategyName: strategy.meta.name, signal: signal.signal, strength: signal.strength, reason: signal.reason, priceAtScan: lastBar?.close }).catch(() => {});
+      } catch { results.push({ stockCode: code, signal: "HOLD" as const, strength: 0, reason: "조회 실패", priceAtScan: 0 }); }
+    }
+    return results;
+  }),
 });
 
 // ─── Settings Router (Telegram) ───────────────────────────────────────────────
@@ -542,6 +623,7 @@ export const appRouter = router({
   strategy: strategyRouter,
   autoTrader: autoTraderRouter,
   backtest: backtestRouter,
+  screener: screenerRouter,
   settings: settingsRouter,
 });
 

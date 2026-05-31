@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Plus, Trash2, Bot, BotOff, Search, Star, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Bot, BotOff, Search, Star, ChevronUp, ChevronDown, Wifi, WifiOff } from "lucide-react";
+import { useRealtimeQuote, useRealtimeConnection } from "@/hooks/useRealtime";
 
 interface Props {
   selectedCode: string | null;
@@ -10,9 +11,10 @@ interface Props {
 
 export default function WatchlistPanel({ selectedCode, onSelect }: Props) {
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [searchResults, setSearchResults] = useState<Array<{ code: string; name: string; market: string }>>([]);
+  const [searchResults, setSearchResults] = useState<Array<{ code: string; name: string; market: string }>>([])
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const isRealtimeConnected = useRealtimeConnection();
 
   const utils = trpc.useUtils();
   const { data: watchlist = [] } = trpc.watchlist.list.useQuery();
@@ -85,6 +87,13 @@ export default function WatchlistPanel({ selectedCode, onSelect }: Props) {
           <Star size={12} />
           <span>관심종목</span>
           <span className="text-muted-foreground">({watchlist.length})</span>
+          <span title={isRealtimeConnected ? "실시간 연결됨" : "실시간 연결 안됨"}>
+            {isRealtimeConnected ? (
+              <Wifi size={10} className="text-bull" />
+            ) : (
+              <WifiOff size={10} className="text-muted-foreground" />
+            )}
+          </span>
         </div>
         <button
           onClick={() => setShowSearch(!showSearch)}
@@ -175,10 +184,17 @@ function WatchlistItem({
   onMoveUp?: () => void;
   onMoveDown?: () => void;
 }) {
-  const { data: price } = trpc.kis.getCurrentPrice.useQuery(
+  // Use Socket.IO realtime quote (5s polling fallback)
+  const { quote: realtimeQuote } = useRealtimeQuote(item.stockCode);
+  // REST fallback for initial load
+  const { data: restPrice } = trpc.kis.getCurrentPrice.useQuery(
     { stockCode: item.stockCode },
-    { refetchInterval: 5000, retry: false }
+    { refetchInterval: realtimeQuote ? false : 10000, retry: false }
   );
+
+  const price = realtimeQuote
+    ? { currentPrice: realtimeQuote.currentPrice, changePrice: realtimeQuote.changePrice, changeRate: realtimeQuote.changeRate }
+    : restPrice;
 
   const isUp = price ? price.changePrice >= 0 : null;
 
