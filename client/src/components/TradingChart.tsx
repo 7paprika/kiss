@@ -15,6 +15,7 @@ import {
   type Time,
 } from "lightweight-charts";
 import { trpc } from "@/lib/trpc";
+import { useRealtimeQuote } from "@/hooks/useRealtime";
 import { BarChart2, TrendingUp, Activity, Waves, GitBranch } from "lucide-react";
 
 type Period = "D" | "W" | "M";
@@ -132,6 +133,38 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     { stockCode, period },
     { enabled: !!stockCode, staleTime: 60_000 }
   );
+
+  // Realtime tick: subscribe to live price via Socket.IO
+  const { quote: realtimeQuote } = useRealtimeQuote(stockCode);
+
+  // Update the last candle bar when a realtime tick arrives
+  useEffect(() => {
+    if (!realtimeQuote || !candleSeriesRef.current || period !== "D") return;
+    const today = new Date();
+    const timeStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const price = realtimeQuote.currentPrice || 0;
+    if (!price) return;
+    const open = realtimeQuote.open || price;
+    const high = realtimeQuote.high || price;
+    const low = realtimeQuote.low || price;
+    const volume = realtimeQuote.volume || 0;
+    candleSeriesRef.current.update({
+      time: timeStr as Time,
+      open: open || price,
+      high: Math.max(high || price, price),
+      low: Math.min(low || price, price),
+      close: price,
+    });
+    if (volSeriesRef.current && volume) {
+      volSeriesRef.current.update({
+        time: timeStr as Time,
+        value: volume,
+        color: price >= (open || price) ? "rgba(38,166,154,0.6)" : "rgba(239,83,80,0.6)",
+      });
+    }
+    // Update crosshair display
+    setCrosshairData(prev => ({ ...prev, close: price, high: Math.max(high || price, price), low: Math.min(low || price, price) }));
+  }, [realtimeQuote, period]);
 
   const toggleIndicator = useCallback((ind: Indicator) => {
     setIndicators((prev) => {

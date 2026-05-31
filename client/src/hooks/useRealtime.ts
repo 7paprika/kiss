@@ -1,6 +1,6 @@
 /**
  * useRealtime - Socket.IO 실시간 시세 훅
- * 종목 코드를 구독하면 5초마다 갱신되는 현재가 데이터를 반환합니다.
+ * 종목 코드를 구독하면 서버 폴링(3초 주기) 또는 KIS WS push 데이터를 수신합니다.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -125,10 +125,14 @@ export function useRealtimeQuote(stockCode: string | null) {
 
 export interface RealtimeSignal {
   stockCode: string;
-  signal: "BUY" | "SELL";
+  stockName?: string;
+  signal?: "BUY" | "SELL";
+  action?: "BUY" | "SELL";
   strength: number;
-  reason: string;
-  strategyName: string;
+  reason?: string;
+  strategyName?: string;
+  strategy?: string;
+  timestamp?: number;
 }
 
 export function useRealtimeSignals() {
@@ -157,15 +161,6 @@ export function useRealtimeSignals() {
 }
 
 // ─── useRealtimeSignal (callback variant) ─────────────────────────────────────
-export interface RealtimeSignal {
-  stockCode: string;
-  stockName: string;
-  action: "BUY" | "SELL";
-  strategy: string;
-  strength: number;
-  timestamp: number;
-}
-
 export function useRealtimeSignal(onSignal: (signal: RealtimeSignal) => void) {
   const { user } = useAuth();
   const onSignalRef = useRef(onSignal);

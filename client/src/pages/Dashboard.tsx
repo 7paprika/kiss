@@ -29,7 +29,7 @@ export default function Dashboard() {
   const [rightTab, setRightTab] = useState<RightTab>("strategy");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [signalBanner, setSignalBanner] = useState<{ stockCode: string; stockName: string; action: string; strategy: string } | null>(null);
+  const [signalBanner, setSignalBanner] = useState<{ stockCode: string; stockName?: string; action?: string; signal?: string; strategy?: string; strategyName?: string } | null>(null);
 
   // Listen for realtime trading signals
   useRealtimeSignal((signal) => {
@@ -37,10 +37,10 @@ export default function Dashboard() {
     toast((
       <div className="flex flex-col gap-0.5">
         <div className="font-semibold text-xs">
-          {signal.action === "BUY" ? "매수" : "매도"} 신호 발생
+          {(signal.action ?? signal.signal) === "BUY" ? "매수" : "매도"} 신호 발생
         </div>
         <div className="text-xs text-muted-foreground">
-          {signal.stockName} ({signal.stockCode}) · {signal.strategy}
+          {signal.stockName ?? signal.stockCode} ({signal.stockCode}) · {signal.strategy ?? signal.strategyName}
         </div>
       </div>
     ), { duration: 6000 });
@@ -101,13 +101,13 @@ export default function Dashboard() {
       {/* Signal Banner */}
       {signalBanner && (
         <div className={`flex items-center justify-between px-4 py-1.5 text-xs font-medium shrink-0 ${
-          signalBanner.action === "BUY" ? "bg-bull/20 text-bull border-b border-bull/30" : "bg-bear/20 text-bear border-b border-bear/30"
+          (signalBanner.action ?? signalBanner.signal) === "BUY" ? "bg-bull/20 text-bull border-b border-bull/30" : "bg-bear/20 text-bear border-b border-bear/30"
         }`}>
           <div className="flex items-center gap-2">
             <Zap size={12} className="animate-pulse" />
-            <span>{signalBanner.action === "BUY" ? "매수" : "매도"} 신호</span>
-            <span className="font-bold">{signalBanner.stockName} ({signalBanner.stockCode})</span>
-            <span className="text-muted-foreground">· {signalBanner.strategy}</span>
+            <span>{(signalBanner.action ?? signalBanner.signal) === "BUY" ? "매수" : "매도"} 신호</span>
+            <span className="font-bold">{signalBanner.stockName ?? signalBanner.stockCode} ({signalBanner.stockCode})</span>
+            <span className="text-muted-foreground">· {signalBanner.strategy ?? signalBanner.strategyName}</span>
           </div>
           <button onClick={() => setSignalBanner(null)} className="opacity-60 hover:opacity-100 text-lg leading-none">×</button>
         </div>

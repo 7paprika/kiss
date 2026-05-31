@@ -156,7 +156,8 @@ export function setupRealtimeServer(httpServer: HttpServer) {
 }
 
 // ─── Quote Polling (Fallback) ─────────────────────────────────────────────────
-// KIS REST API를 5초마다 폴링하여 실시간 시세를 시뮬레이션
+// KIS REST API를 3초마다 폴링하여 실시간 시세를 시뮬레이션
+// (KIS WebSocket 승인키 발급 후 실제 WS 연결로 교체 가능)
 
 const quoteCache = new Map<string, RealtimeQuote>();
 
@@ -228,7 +229,7 @@ function startPollingForStock(stockCode: string, userId: number) {
       // Broadcast to all clients in the stock room
       io.to(`stock:${stockCode}`).emit("quote", quote);
     }
-  }, 5000); // 5-second polling interval
+  }, 3000); // 3-second polling interval (KIS REST fallback)
 
   pollingIntervals.set(stockCode, interval);
   console.log(`[Realtime] Started polling for ${stockCode}`);
