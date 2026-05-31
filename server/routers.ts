@@ -15,6 +15,8 @@ import { nanoid } from "nanoid";
 import { runBacktest } from "./backtest";
 import { sendTelegramMessage, testTelegramConnection } from "./telegram";
 import { initKisClientForUser } from "./autoTrader";
+import { fetchStockNewsAndDisclosures } from "./news";
+import { runGridSearch, STRATEGY_PARAM_SPACES } from "./optimizer";
 import { createHeartbeatJob, deleteHeartbeatJob } from "./_core/heartbeat";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
@@ -818,6 +820,69 @@ const performanceRouter = router({
   }),
 });
 
+// ─── Optimizer Router ────────────────────────────────────────────────────────────
+const optimizerRouter = router({
+  getParamSpaces: protectedProcedure.query(() => {
+    return Object.entries(STRATEGY_PARAM_SPACES).map(([id, ranges]) => ({ id, ranges }));
+  }),
+
+  runOptimization: protectedProcedure
+    .input(z.object({
+      strategyId: z.string(),
+      stockCode: z.string().min(1).max(10),
+      period: z.enum(["D", "W", "M"]).default("D"),
+      initialCapital: z.number().min(100000).max(1000000000).default(10000000),
+      stopLossPct: z.number().min(0).max(50).optional(),
+      takeProfitPct: z.number().min(0).max(200).optional(),
+      maxCombinations: z.number().min(10).max(500).default(150),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!checkRateLimit(`optimizer:${ctx.user.id}`, 2, 120_000)) {
+        throw new Error("최적화 요청이 너무 많습니다. 2분 후 다시 시도해주세요.");
+      }
+      const client = await initKisClientForUser(ctx.user.id);
+      if (!client) throw new Error("KIS API 연결이 필요합니다");
+      const ohlcv = await client.getOHLCV(input.stockCode, input.period);
+      if (ohlcv.length < 60) throw new Error("최적화에 필요한 데이터가 부족합니다 (최소 60바 필요)");
+      return runGridSearch({
+        strategyId: input.strategyId,
+        ohlcv,
+        stockCode: input.stockCode,
+        period: input.period,
+        initialCapital: input.initialCapital,
+        stopLossPct: input.stopLossPct,
+        takeProfitPct: input.takeProfitPct,
+        maxCombinations: input.maxCombinations,
+      });
+    }),
+});
+
+// ─── News Router ────────────────────────────────────────────────────────────
+const newsRouter = router({
+  getStockNews: protectedProcedure
+    .input(z.object({
+      stockCode: z.string().min(1).max(10),
+      stockName: z.string().optional().default(""),
+      limit: z.number().min(5).max(50).default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      if (!checkRateLimit(`news:${ctx.user.id}`, 20, 60_000)) {
+        throw new Error("뉴스 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.");
+      }
+      return fetchStockNewsAndDisclosures(input.stockCode, input.stockName, input.limit);
+    }),
+
+  getMarketNews: protectedProcedure
+    .input(z.object({ limit: z.number().min(5).max(30).default(15) }))
+    .query(async ({ ctx, input }) => {
+      if (!checkRateLimit(`news:market:${ctx.user.id}`, 10, 60_000)) {
+        throw new Error("뉴스 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.");
+      }
+      // 시장 전반 뉴스 (코스피/코스닥)
+      return fetchStockNewsAndDisclosures("005930", "삼성전자", input.limit);
+    }),
+});
+
 // ─── App Router ───────────────────────────────────────────────────────────────
 export const appRouter = router({
   system: systemRouter,
@@ -837,6 +902,8 @@ export const appRouter = router({
   screener: screenerRouter,
   settings: settingsRouter,
   performance: performanceRouter,
+  news: newsRouter,
+  optimizer: optimizerRouter,
 });
 
 export type AppRouter = typeof appRouter;
