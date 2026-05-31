@@ -11,6 +11,7 @@ import {
 import { encrypt, decrypt } from "./crypto";
 import { KisApiClient, setKisClient } from "./kisApi";
 import { getAllStrategyMeta } from "./strategies/index";
+import { runBacktest } from "./backtest";
 import { sendTelegramMessage, testTelegramConnection } from "./telegram";
 import { initKisClientForUser } from "./autoTrader";
 import { createHeartbeatJob, deleteHeartbeatJob } from "./_core/heartbeat";
@@ -442,6 +443,41 @@ const autoTraderRouter = router({
   }),
 });
 
+// ─── Backtest Router ───────────────────────────────────────────────────────────────────
+const backtestRouter = router({
+  run: protectedProcedure.input(z.object({
+    stockCode: z.string().min(1),
+    strategyId: z.string().min(1),
+    period: z.enum(["D", "W", "M"]).default("D"),
+    initialCapital: z.number().min(100_000).default(10_000_000),
+    stopLossPct: z.number().min(0).max(50).default(0),
+    takeProfitPct: z.number().min(0).max(100).default(0),
+    strategyParams: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).optional(),
+  })).mutation(async ({ ctx, input }) => {
+    if (!checkRateLimit(`backtest:${ctx.user.id}`, 10, 60_000)) {
+      throw new Error("백테스트 요청이 너무 많습니다. 1분 후 다시 시도해주세요.");
+    }
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+
+    // Fetch enough historical data (up to 600 bars)
+    const ohlcv = await client.getOHLCV(input.stockCode, input.period);
+    if (ohlcv.length < 60) throw new Error("백테스트에 필요한 데이터가 부족합니다 (최소 60바 필요)");
+
+    const result = runBacktest({
+      strategyId: input.strategyId,
+      ohlcv,
+      stockCode: input.stockCode,
+      initialCapital: input.initialCapital,
+      stopLossPct: input.stopLossPct,
+      takeProfitPct: input.takeProfitPct,
+      strategyParams: input.strategyParams as Record<string, number | string | boolean> | undefined,
+    });
+
+    return result;
+  }),
+});
+
 // ─── Settings Router (Telegram) ───────────────────────────────────────────────
 const settingsRouter = router({
   getTelegramSettings: protectedProcedure.query(async ({ ctx }) => {
@@ -505,6 +541,7 @@ export const appRouter = router({
   watchlist: watchlistRouter,
   strategy: strategyRouter,
   autoTrader: autoTraderRouter,
+  backtest: backtestRouter,
   settings: settingsRouter,
 });
 

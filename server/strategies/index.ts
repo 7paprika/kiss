@@ -550,6 +550,221 @@ export const weekHigh52TradingStrategy: ITradingStrategy = {
   },
 };
 
+// ─── Strategy 6: MACD Crossover (Appel 1979, Brock et al. 1992) ─────────────
+// Selection: Stocks where MACD line just crossed above signal line
+// Trading: Buy on MACD golden cross, sell on death cross
+
+export function calcStochasticHelper(
+  highs: number[], lows: number[], closes: number[], k = 14, d = 3
+): Array<{ k: number; d: number }> {
+  const rawK: number[] = closes.map((_, i) => {
+    if (i < k - 1) return NaN;
+    const hh = Math.max(...highs.slice(i - k + 1, i + 1));
+    const ll = Math.min(...lows.slice(i - k + 1, i + 1));
+    return hh === ll ? 50 : ((closes[i] - ll) / (hh - ll)) * 100;
+  });
+  const smoothK: number[] = rawK.map((_, i) => {
+    if (i < k + 1) return NaN;
+    const slice = rawK.slice(i - 2, i + 1).filter(v => !isNaN(v));
+    return slice.length === 3 ? slice.reduce((a, b) => a + b, 0) / 3 : NaN;
+  });
+  const smoothD: number[] = smoothK.map((_, i) => {
+    if (i < k + 3) return NaN;
+    const slice = smoothK.slice(i - 2, i + 1).filter(v => !isNaN(v));
+    return slice.length === 3 ? slice.reduce((a, b) => a + b, 0) / 3 : NaN;
+  });
+  return closes.map((_, i) => ({ k: smoothK[i] ?? NaN, d: smoothD[i] ?? NaN }));
+}
+
+export const macdSelectionStrategy: ISelectionStrategy = {
+  meta: {
+    id: "macd_selection",
+    name: "MACD 골든크로스 종목 선정",
+    description: "MACD 선이 시그널 선을 상향 돌파한 종목을 선정합니다. (Appel 1979)",
+    type: "selection",
+    defaultParams: { fast: 12, slow: 26, signal: 9, minHistogram: 0 },
+    paramSchema: [
+      { key: "fast", label: "단기 EMA 기간", type: "number", min: 5, max: 20, step: 1 },
+      { key: "slow", label: "장기 EMA 기간", type: "number", min: 15, max: 50, step: 1 },
+      { key: "signal", label: "시그널 기간", type: "number", min: 3, max: 15, step: 1 },
+      { key: "minHistogram", label: "최소 히스토그램 값", type: "number", min: 0, max: 100, step: 1 },
+    ],
+    reference: "Appel (1979) - Technical Analysis Using MACD; Brock et al. (1992) - Journal of Finance",
+  },
+  select(candidates, params) {
+    const fast = Number(params.fast) || 12;
+    const slow = Number(params.slow) || 26;
+    const signal = Number(params.signal) || 9;
+    const minHist = Number(params.minHistogram) || 0;
+    const results: SelectionResult[] = [];
+
+    for (const { code, ohlcv } of candidates) {
+      if (ohlcv.length < slow + signal + 5) continue;
+      const closes = ohlcv.map(d => d.close);
+      const macdData = calcMACD(closes, fast, slow, signal);
+      const n = macdData.length;
+      if (n < 2) continue;
+      const curr = macdData[n - 1];
+      const prev = macdData[n - 2];
+      // MACD golden cross: MACD crossed above signal
+      if (!isNaN(curr.macd) && !isNaN(curr.signal) && !isNaN(prev.macd) && !isNaN(prev.signal)) {
+        const crossedUp = prev.macd <= prev.signal && curr.macd > curr.signal;
+        const histogram = curr.macd - curr.signal;
+        if (crossedUp && histogram >= minHist) {
+          results.push({
+            stockCode: code,
+            score: Math.min(histogram / 100, 1),
+            reason: `MACD 골든크로스 (MACD: ${curr.macd.toFixed(2)}, Signal: ${curr.signal.toFixed(2)})`,
+          });
+        }
+      }
+    }
+    return results.sort((a, b) => b.score - a.score);
+  },
+};
+
+export const macdTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "macd_trading",
+    name: "MACD 크로스오버 매매",
+    description: "MACD 골든크로스 매수, 데드크로스 매도 전략입니다.",
+    type: "trading",
+    defaultParams: { fast: 12, slow: 26, signal: 9 },
+    paramSchema: [
+      { key: "fast", label: "단기 EMA 기간", type: "number", min: 5, max: 20, step: 1 },
+      { key: "slow", label: "장기 EMA 기간", type: "number", min: 15, max: 50, step: 1 },
+      { key: "signal", label: "시그널 기간", type: "number", min: 3, max: 15, step: 1 },
+    ],
+    reference: "Appel (1979) - Technical Analysis Using MACD",
+  },
+  evaluate(ohlcv, params) {
+    const fast = Number(params.fast) || 12;
+    const slow = Number(params.slow) || 26;
+    const signal = Number(params.signal) || 9;
+    if (ohlcv.length < slow + signal + 5) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const closes = ohlcv.map(d => d.close);
+    const macdData = calcMACD(closes, fast, slow, signal);
+    const n = macdData.length;
+    const curr = macdData[n - 1];
+    const prev = macdData[n - 2];
+
+    if (isNaN(curr.macd) || isNaN(curr.signal)) return { signal: "HOLD", strength: 0, reason: "MACD 계산 불가" };
+
+    const histogram = curr.macd - curr.signal;
+    const prevHistogram = prev.macd - prev.signal;
+
+    // Golden cross (MACD crosses above signal)
+    if (prevHistogram <= 0 && histogram > 0) {
+      return { signal: "BUY", strength: Math.min(0.6 + Math.abs(histogram) / 50, 0.95), reason: `MACD 골든크로스 (히스토그램: ${histogram.toFixed(2)})`, indicators: { macd: curr.macd, signal: curr.signal, histogram } };
+    }
+    // Death cross (MACD crosses below signal)
+    if (prevHistogram >= 0 && histogram < 0) {
+      return { signal: "SELL", strength: Math.min(0.6 + Math.abs(histogram) / 50, 0.95), reason: `MACD 데드크로스 (히스토그램: ${histogram.toFixed(2)})`, indicators: { macd: curr.macd, signal: curr.signal, histogram } };
+    }
+    // Trend continuation
+    if (histogram > 0 && curr.macd > 0) return { signal: "BUY", strength: 0.4, reason: `MACD 상승 추세 지속 (히스토그램: ${histogram.toFixed(2)})` };
+    if (histogram < 0 && curr.macd < 0) return { signal: "SELL", strength: 0.4, reason: `MACD 하락 추세 지속 (히스토그램: ${histogram.toFixed(2)})` };
+    return { signal: "HOLD", strength: 0.3, reason: `MACD 중립 (히스토그램: ${histogram.toFixed(2)})` };
+  },
+};
+
+// ─── Strategy 7: Stochastic Oscillator (Lane 1950s, Jegadeesh 1990) ──────────
+// Selection: Stocks in oversold zone with %K crossing above %D
+// Trading: Buy on stochastic golden cross in oversold zone, sell in overbought
+
+export const stochasticSelectionStrategy: ISelectionStrategy = {
+  meta: {
+    id: "stochastic_selection",
+    name: "스토캐스틱 과매도 종목 선정",
+    description: "스토캐스틱 %K가 과매도 구간에서 %D를 상향 돌파한 종목을 선정합니다.",
+    type: "selection",
+    defaultParams: { kPeriod: 14, dPeriod: 3, oversoldLevel: 25 },
+    paramSchema: [
+      { key: "kPeriod", label: "%K 기간", type: "number", min: 5, max: 30, step: 1 },
+      { key: "dPeriod", label: "%D 기간", type: "number", min: 2, max: 10, step: 1 },
+      { key: "oversoldLevel", label: "과매도 기준", type: "number", min: 10, max: 35, step: 5 },
+    ],
+    reference: "Lane (1950s) - Stochastic Oscillator; Jegadeesh (1990) - Journal of Finance",
+  },
+  select(candidates, params) {
+    const kPeriod = Number(params.kPeriod) || 14;
+    const dPeriod = Number(params.dPeriod) || 3;
+    const oversold = Number(params.oversoldLevel) || 25;
+    const results: SelectionResult[] = [];
+
+    for (const { code, ohlcv } of candidates) {
+      if (ohlcv.length < kPeriod + dPeriod + 5) continue;
+      const highs = ohlcv.map(d => d.high);
+      const lows = ohlcv.map(d => d.low);
+      const closes = ohlcv.map(d => d.close);
+      const stoch = calcStochasticHelper(highs, lows, closes, kPeriod, dPeriod);
+      const n = stoch.length;
+      const curr = stoch[n - 1];
+      const prev = stoch[n - 2];
+      if (isNaN(curr.k) || isNaN(curr.d) || isNaN(prev.k) || isNaN(prev.d)) continue;
+      // Oversold golden cross
+      if (curr.k < oversold && prev.k <= prev.d && curr.k > curr.d) {
+        results.push({
+          stockCode: code,
+          score: (oversold - curr.k) / oversold,
+          reason: `스토캐스틱 과매도 반전 (%K: ${curr.k.toFixed(1)}, %D: ${curr.d.toFixed(1)})`,
+        });
+      }
+    }
+    return results.sort((a, b) => b.score - a.score);
+  },
+};
+
+export const stochasticTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "stochastic_trading",
+    name: "스토캐스틱 매매",
+    description: "스토캐스틱 과매도 반전 매수, 과매수 반전 매도 전략입니다.",
+    type: "trading",
+    defaultParams: { kPeriod: 14, dPeriod: 3, oversoldLevel: 20, overboughtLevel: 80 },
+    paramSchema: [
+      { key: "kPeriod", label: "%K 기간", type: "number", min: 5, max: 30, step: 1 },
+      { key: "dPeriod", label: "%D 기간", type: "number", min: 2, max: 10, step: 1 },
+      { key: "oversoldLevel", label: "과매도 기준", type: "number", min: 10, max: 35, step: 5 },
+      { key: "overboughtLevel", label: "과매수 기준", type: "number", min: 65, max: 90, step: 5 },
+    ],
+    reference: "Lane (1950s) - Stochastic Oscillator",
+  },
+  evaluate(ohlcv, params) {
+    const kPeriod = Number(params.kPeriod) || 14;
+    const dPeriod = Number(params.dPeriod) || 3;
+    const oversold = Number(params.oversoldLevel) || 20;
+    const overbought = Number(params.overboughtLevel) || 80;
+    if (ohlcv.length < kPeriod + dPeriod + 5) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const highs = ohlcv.map(d => d.high);
+    const lows = ohlcv.map(d => d.low);
+    const closes = ohlcv.map(d => d.close);
+    const stoch = calcStochasticHelper(highs, lows, closes, kPeriod, dPeriod);
+    const n = stoch.length;
+    const curr = stoch[n - 1];
+    const prev = stoch[n - 2];
+
+    if (isNaN(curr.k) || isNaN(curr.d)) return { signal: "HOLD", strength: 0, reason: "스토캐스틱 계산 불가" };
+
+    // Oversold golden cross → BUY
+    if (curr.k < oversold && prev.k <= prev.d && curr.k > curr.d) {
+      const strength = Math.min(0.7 + (oversold - curr.k) / oversold * 0.3, 0.95);
+      return { signal: "BUY", strength, reason: `스토캐스틱 과매도 반전 (%K: ${curr.k.toFixed(1)})`, indicators: { k: curr.k, d: curr.d } };
+    }
+    // Overbought death cross → SELL
+    if (curr.k > overbought && prev.k >= prev.d && curr.k < curr.d) {
+      const strength = Math.min(0.7 + (curr.k - overbought) / (100 - overbought) * 0.3, 0.95);
+      return { signal: "SELL", strength, reason: `스토캐스틱 과매수 반전 (%K: ${curr.k.toFixed(1)})`, indicators: { k: curr.k, d: curr.d } };
+    }
+    // Zone signals
+    if (curr.k < oversold) return { signal: "BUY", strength: 0.45, reason: `스토캐스틱 과매도 구간 (%K: ${curr.k.toFixed(1)})` };
+    if (curr.k > overbought) return { signal: "SELL", strength: 0.45, reason: `스토캐스틱 과매수 구간 (%K: ${curr.k.toFixed(1)})` };
+    return { signal: "HOLD", strength: 0.3, reason: `스토캐스틱 중립 (%K: ${curr.k.toFixed(1)})` };
+  },
+};
+
 // ─── Strategy Registry ────────────────────────────────────────────────────────
 
 export const SELECTION_STRATEGIES: ISelectionStrategy[] = [
@@ -558,6 +773,8 @@ export const SELECTION_STRATEGIES: ISelectionStrategy[] = [
   rsiSelectionStrategy,
   goldenCrossSelectionStrategy,
   weekHigh52SelectionStrategy,
+  macdSelectionStrategy,
+  stochasticSelectionStrategy,
 ];
 
 export const TRADING_STRATEGIES: ITradingStrategy[] = [
@@ -566,6 +783,8 @@ export const TRADING_STRATEGIES: ITradingStrategy[] = [
   rsiTradingStrategy,
   goldenCrossTradingStrategy,
   weekHigh52TradingStrategy,
+  macdTradingStrategy,
+  stochasticTradingStrategy,
 ];
 
 export function getSelectionStrategy(id: string): ISelectionStrategy | undefined {

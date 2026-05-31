@@ -134,6 +134,82 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
     return;
   }
 
+  // ─── Phase 0: Stop-loss / Take-profit check on ALL holdings ─────────────────
+  const stopLossPct = Number(config.stopLossPct) || 0;
+  const takeProfitPct = Number(config.takeProfitPct) || 0;
+
+  if (stopLossPct > 0 || takeProfitPct > 0) {
+    try {
+      const balance = await client.getBalance();
+      for (const holding of balance.holdings) {
+        if (holding.holdQty <= 0) continue;
+
+        const avgPrice = holding.avgPrice || 0;
+        const currentPrice = holding.currentPrice || 0;
+        if (avgPrice <= 0 || currentPrice <= 0) continue;
+
+        const pnlPct = (currentPrice - avgPrice) / avgPrice * 100;
+        let exitReason = "";
+
+        if (stopLossPct > 0 && pnlPct <= -stopLossPct) {
+          exitReason = `손절 청산 (수익률: ${pnlPct.toFixed(2)}%, 기준: -${stopLossPct}%)`;
+        } else if (takeProfitPct > 0 && pnlPct >= takeProfitPct) {
+          exitReason = `익절 청산 (수익률: +${pnlPct.toFixed(2)}%, 기준: +${takeProfitPct}%)`;
+        }
+
+        if (exitReason) {
+          await log(userId, "signal", `${holding.stockCode} ${exitReason}`, holding.stockCode);
+
+          const orderResult = await client.placeOrder(
+            holding.stockCode, "sell", holding.holdQty, currentPrice, "market"
+          );
+
+          const watchlistItem = (await db.select().from(watchlist)
+            .where(and(eq(watchlist.userId, userId), eq(watchlist.stockCode, holding.stockCode)))
+            .limit(1))[0];
+
+          await db.insert(orders).values({
+            userId,
+            stockCode: holding.stockCode,
+            stockName: watchlistItem?.stockName || holding.stockCode,
+            orderType: "sell",
+            priceType: "market",
+            quantity: holding.holdQty,
+            price: String(currentPrice),
+            status: orderResult.success ? "pending" : "rejected",
+            kisOrderNo: orderResult.orderNo,
+            strategyId: "stop_loss_take_profit",
+            isAutoOrder: true,
+            errorMsg: orderResult.success ? null : orderResult.message,
+          });
+
+          if (orderResult.success) {
+            const emoji = exitReason.startsWith("손절") ? "🛑" : "💰";
+            await sendTelegramMessage(userId, "order",
+              `${emoji} *${exitReason.startsWith("손절") ? "손절" : "익절"} 자동 청산*\n\n` +
+              `종목: ${holding.stockCode}\n` +
+              `수량: ${holding.holdQty}주\n` +
+              `평단가: ${avgPrice.toLocaleString()}원\n` +
+              `현재가: ${currentPrice.toLocaleString()}원\n` +
+              `수익률: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`
+            );
+            await log(userId, "info",
+              `${exitReason.startsWith("손절") ? "손절" : "익절"} 청산 주문 접수: ${holding.stockCode} ${holding.holdQty}주`,
+              holding.stockCode
+            );
+          } else {
+            await sendTelegramMessage(userId, "error",
+              `❌ ${exitReason.startsWith("손절") ? "손절" : "익절"} 청산 실패: ${holding.stockCode}\n사유: ${orderResult.message}`
+            );
+          }
+        }
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      await log(userId, "error", `손절/익절 체크 오류: ${message}`);
+    }
+  }
+
   // Get watchlist
   const watchlistItems = await db.select().from(watchlist).where(
     and(eq(watchlist.userId, userId), eq(watchlist.isAutoTrading, true))

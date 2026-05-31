@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Settings2, Zap, Target, Play, Square, Info, Link2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings2, Zap, Target, Play, Square, Info, Link2, ShieldAlert, TrendingUp, TrendingDown } from "lucide-react";
 
 export default function StrategyPanel() {
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
@@ -237,6 +237,35 @@ export default function StrategyPanel() {
             </div>
           </div>
         </div>
+
+        {/* Stop-loss / Take-profit Status */}
+        {(Number(autoConfig?.stopLossPct) > 0 || Number(autoConfig?.takeProfitPct) > 0) && (
+          <div className="mt-2 p-2 rounded bg-secondary/40 border border-border/50">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <ShieldAlert size={11} className="text-yellow-400" />
+              <span className="text-[10px] font-semibold text-yellow-400">자동 청산 활성</span>
+            </div>
+            <div className="flex gap-3 text-[10px]">
+              {Number(autoConfig?.stopLossPct) > 0 && (
+                <div className="flex items-center gap-1">
+                  <TrendingDown size={10} className="text-bear" />
+                  <span className="text-muted-foreground">손절:</span>
+                  <span className="text-bear font-mono font-bold">-{autoConfig?.stopLossPct}%</span>
+                </div>
+              )}
+              {Number(autoConfig?.takeProfitPct) > 0 && (
+                <div className="flex items-center gap-1">
+                  <TrendingUp size={10} className="text-bull" />
+                  <span className="text-muted-foreground">익절:</span>
+                  <span className="text-bull font-mono font-bold">+{autoConfig?.takeProfitPct}%</span>
+                </div>
+              )}
+            </div>
+            <p className="text-[9px] text-muted-foreground mt-1">
+              자동매매 사이클마다 보유 종목 전체를 스캔하여 기준 초과 시 시장가 청산합니다.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Strategy Sections */}

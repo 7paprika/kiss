@@ -16,8 +16,9 @@ import StrategyPanel from "@/components/StrategyPanel";
 import TelegramPanel from "@/components/TelegramPanel";
 import LogPanel from "@/components/LogPanel";
 import KisSettingsModal from "@/components/KisSettingsModal";
+import BacktestPanel from "@/components/BacktestPanel";
 
-type RightTab = "strategy" | "telegram" | "log";
+type RightTab = "strategy" | "telegram" | "log" | "backtest";
 
 export default function Dashboard() {
   const { user, loading, isAuthenticated } = useAuth();
@@ -205,6 +206,7 @@ export default function Dashboard() {
           <div className="flex border-b border-border shrink-0">
             {([
               { id: "strategy" as RightTab, icon: Zap, label: "전략" },
+              { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트" },
               { id: "telegram" as RightTab, icon: MessageSquare, label: "알림" },
               { id: "log" as RightTab, icon: FileText, label: "로그" },
             ] as const).map(({ id, icon: Icon, label }) => (
@@ -226,6 +228,12 @@ export default function Dashboard() {
           {/* Right Tab Content */}
           <div className="flex-1 overflow-hidden">
             {rightTab === "strategy" && <StrategyPanel />}
+            {rightTab === "backtest" && (
+              <BacktestPanel
+                selectedStockCode={selectedStock?.code}
+                selectedStockName={selectedStock?.name}
+              />
+            )}
             {rightTab === "telegram" && (
               <div className="overflow-y-auto h-full">
                 <TelegramPanel />
