@@ -452,6 +452,7 @@ const autoTraderRouter = router({
     maxOrderAmount: z.number().positive().default(1_000_000),
     stopLossPct: z.number().min(0).max(50).default(3),
     takeProfitPct: z.number().min(0).max(100).default(5),
+    accountProfileId: z.number().nullable().optional(), // 전략별 계좌 배정
   })).mutation(async ({ ctx, input }) => {
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
@@ -463,6 +464,7 @@ const autoTraderRouter = router({
       maxOrderAmount: String(input.maxOrderAmount),
       stopLossPct: String(input.stopLossPct),
       takeProfitPct: String(input.takeProfitPct),
+      accountProfileId: input.accountProfileId ?? null,
     };
     if (existing.length) {
       await db.update(autoTraderConfig).set(data).where(eq(autoTraderConfig.userId, ctx.user.id));

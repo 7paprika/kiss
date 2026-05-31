@@ -88,6 +88,7 @@ export const autoTraderConfig = mysqlTable("auto_trader_config", {
   stopLossPct: decimal("stopLossPct", { precision: 5, scale: 2 }).default("3.00"),   // 손절 %
   takeProfitPct: decimal("takeProfitPct", { precision: 5, scale: 2 }).default("5.00"), // 익절 %
   scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }), // Heartbeat task UID
+  accountProfileId: int("accountProfileId"), // FK -> kisSettings.id (전략별 계좌 배정)
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
@@ -108,6 +109,7 @@ export const orders = mysqlTable("orders", {
   status: mysqlEnum("status", ["pending", "partial", "filled", "cancelled", "rejected"]).default("pending").notNull(),
   kisOrderNo: varchar("kisOrderNo", { length: 50 }), // KIS 주문번호
   strategyId: varchar("strategyId", { length: 50 }), // 어떤 전략에서 발생한 주문인지
+  accountProfileId: int("accountProfileId"), // 어떤 계좌 프로필로 실행된 주문인지
   isAutoOrder: boolean("isAutoOrder").default(false).notNull(),
   errorMsg: text("errorMsg"),
   orderedAt: timestamp("orderedAt").defaultNow().notNull(),

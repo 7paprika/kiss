@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Settings2, Zap, Target, Play, Square, Info, Link2, ShieldAlert, TrendingUp, TrendingDown } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings2, Zap, Target, Play, Square, Info, Link2, ShieldAlert, TrendingUp, TrendingDown, CreditCard } from "lucide-react";
 
 export default function StrategyPanel() {
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
@@ -12,6 +12,7 @@ export default function StrategyPanel() {
   const { data: userConfigs = [] } = trpc.strategy.getUserConfigs.useQuery();
   const { data: autoConfig } = trpc.autoTrader.getConfig.useQuery();
   const { data: kisSettings } = trpc.kis.getSettings.useQuery();
+  const { data: accounts = [] } = trpc.kis.listAccounts.useQuery();
 
   const initMutation = trpc.strategy.initDefaults.useMutation({
     onSuccess: () => utils.strategy.getUserConfigs.invalidate(),
@@ -112,6 +113,41 @@ export default function StrategyPanel() {
         </div>
         {!kisSettings?.isActive && (
           <p className="text-[10px] text-bear">⚠️ KIS API 연결 후 자동매매 사용 가능</p>
+        )}
+
+        {/* Account Assignment */}
+        {accounts.length > 1 && (
+          <div className="mt-2">
+            <div className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1 mb-1">
+              <CreditCard size={10} />
+              자동매매 계좌 배정
+            </div>
+            <select
+              value={autoConfig?.accountProfileId || ""}
+              onChange={(e) => saveAutoMutation.mutate({
+                selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
+                tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
+                maxPositions: autoConfig?.maxPositions || 5,
+                maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
+                stopLossPct: Number(autoConfig?.stopLossPct) || 3,
+                takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
+                accountProfileId: e.target.value ? parseInt(e.target.value) : null,
+              })}
+              className="w-full text-xs bg-secondary border border-border rounded px-2 py-1 text-foreground"
+            >
+              <option value="">-- 활성 계좌 사용 (기본값) --</option>
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.profileName} ({acc.accountNo}-{acc.accountProduct}) [{acc.mode === 'paper' ? '모의' : '실전'}]
+                </option>
+              ))}
+            </select>
+            {autoConfig?.accountProfileId && (
+              <p className="text-[9px] text-primary mt-0.5">
+                ✓ 지정 계좌로 자동매매 실행됩니다
+              </p>
+            )}
+          </div>
         )}
 
         {/* Strategy Combination Selector */}

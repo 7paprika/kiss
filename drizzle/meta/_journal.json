@@ -36,6 +36,13 @@
       "when": 1780199700213,
       "tag": "0004_eager_sentinels",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1780200076343,
+      "tag": "0005_slim_slapstick",
+      "breakpoints": true
     }
   ]
 }

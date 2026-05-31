@@ -47,13 +47,22 @@ async function log(
 
 // ─── KIS Client Factory ───────────────────────────────────────────────────────
 
-export async function initKisClientForUser(userId: number): Promise<KisApiClient | null> {
+export async function initKisClientForUser(userId: number, accountProfileId?: number | null): Promise<KisApiClient | null> {
   const db = await getDb();
   if (!db) return null;
 
-  const rows = await db.select().from(kisSettings).where(
-    and(eq(kisSettings.userId, userId), eq(kisSettings.isActive, true))
-  ).limit(1);
+  let rows;
+  if (accountProfileId) {
+    // 특정 계좌 프로필 사용
+    rows = await db.select().from(kisSettings).where(
+      and(eq(kisSettings.userId, userId), eq(kisSettings.id, accountProfileId))
+    ).limit(1);
+  } else {
+    // 기본 활성 계좌 사용
+    rows = await db.select().from(kisSettings).where(
+      and(eq(kisSettings.userId, userId), eq(kisSettings.isActive, true))
+    ).limit(1);
+  }
 
   if (!rows.length) return null;
   const setting = rows[0];
@@ -105,8 +114,8 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
   const config = configs[0];
   await log(userId, "info", "자동매매 사이클 시작");
 
-  // Get KIS client
-  const client = await initKisClientForUser(userId);
+  // Get KIS client (accountProfileId가 설정된 경우 해당 계좌 사용)
+  const client = await initKisClientForUser(userId, config.accountProfileId);
   if (!client) {
     await log(userId, "error", "KIS API 클라이언트 초기화 실패 - API 키를 확인하세요");
     await sendTelegramMessage(userId, "error", "KIS API 클라이언트 초기화 실패 - API 키를 확인하세요");
@@ -179,6 +188,7 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
             status: orderResult.success ? "pending" : "rejected",
             kisOrderNo: orderResult.orderNo,
             strategyId: "stop_loss_take_profit",
+            accountProfileId: config.accountProfileId ?? null,
             isAutoOrder: true,
             errorMsg: orderResult.success ? null : orderResult.message,
           });
@@ -306,6 +316,7 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
           status: orderResult.success ? "pending" : "rejected",
           kisOrderNo: orderResult.orderNo,
           strategyId: tradingConfig.strategyId,
+          accountProfileId: config.accountProfileId ?? null,
           isAutoOrder: true,
           errorMsg: orderResult.success ? null : orderResult.message,
         });
@@ -345,6 +356,7 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
           status: orderResult.success ? "pending" : "rejected",
           kisOrderNo: orderResult.orderNo,
           strategyId: tradingConfig.strategyId,
+          accountProfileId: config.accountProfileId ?? null,
           isAutoOrder: true,
           errorMsg: orderResult.success ? null : orderResult.message,
         });
