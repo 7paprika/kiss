@@ -86,6 +86,21 @@ export interface KisPendingOrder {
   orderTime: string;
 }
 
+export interface KisOrderbookLevel {
+  price: number;
+  quantity: number;
+}
+
+export interface KisOrderbook {
+  stockCode: string;
+  currentPrice: number;
+  totalAskQty: number;
+  totalBidQty: number;
+  asks: KisOrderbookLevel[];  // 매도호가 1~10 (낮은 가격부터)
+  bids: KisOrderbookLevel[];  // 매수호가 1~10 (높은 가격부터)
+  timestamp: number;
+}
+
 // Rate limiter: KIS API allows ~20 requests/second
 class RateLimiter {
   private queue: Array<() => void> = [];
@@ -446,6 +461,39 @@ export class KisApiClient {
 
   getWsUrl(): string {
     return KIS_WS_URL[this.credentials.mode];
+  }
+
+  // 호가 조회 (10단계)
+  async getOrderbook(stockCode: string): Promise<KisOrderbook> {
+    const data = await this.request<{ output1: Record<string, string>; output2: Array<Record<string, string>> }>(
+      "GET",
+      "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
+      "FHKST01010200",
+      { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: stockCode }
+    );
+    const o = data.output1 || {};
+    const asks: KisOrderbookLevel[] = [];
+    const bids: KisOrderbookLevel[] = [];
+    for (let i = 1; i <= 10; i++) {
+      const n = String(i).padStart(2, "0");
+      asks.push({
+        price: Number(o[`askp${n}`] || o[`매도호가${i}`] || 0),
+        quantity: Number(o[`askp_rsqn${n}`] || o[`매도잔량${i}`] || 0),
+      });
+      bids.push({
+        price: Number(o[`bidp${n}`] || o[`매수호가${i}`] || 0),
+        quantity: Number(o[`bidp_rsqn${n}`] || o[`매수잔량${i}`] || 0),
+      });
+    }
+    return {
+      stockCode,
+      currentPrice: Number(o.stck_prpr || 0),
+      totalAskQty: Number(o.total_askp_rsqn || 0),
+      totalBidQty: Number(o.total_bidp_rsqn || 0),
+      asks,
+      bids,
+      timestamp: Date.now(),
+    };
   }
 }
 

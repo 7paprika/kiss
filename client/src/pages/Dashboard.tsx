@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   Settings, Key, BarChart2, ChevronLeft, ChevronRight,
   Activity, Wifi, WifiOff, Bot, MessageSquare, FileText,
-  Zap, Loader2
+  Zap, Loader2, TrendingUp, CreditCard
 } from "lucide-react";
 
 import WatchlistPanel from "@/components/WatchlistPanel";
@@ -18,14 +18,17 @@ import LogPanel from "@/components/LogPanel";
 import KisSettingsModal from "@/components/KisSettingsModal";
 import BacktestPanel from "@/components/BacktestPanel";
 import ScreenerPanel from "@/components/ScreenerPanel";
+import PerformancePanel from "@/components/PerformancePanel";
+import AccountManagerModal from "@/components/AccountManagerModal";
 import { useRealtimeSignal } from "@/hooks/useRealtime";
 
-type RightTab = "strategy" | "backtest" | "screener" | "telegram" | "log";
+type RightTab = "strategy" | "backtest" | "screener" | "performance" | "telegram" | "log";
 
 export default function Dashboard() {
   const { user, loading, isAuthenticated } = useAuth();
   const [selectedStock, setSelectedStock] = useState<{ code: string; name: string } | null>(null);
   const [showKisSettings, setShowKisSettings] = useState(false);
+  const [showAccountManager, setShowAccountManager] = useState(false);
   const [rightTab, setRightTab] = useState<RightTab>("strategy");
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -149,6 +152,16 @@ export default function Dashboard() {
           {/* User */}
           <span className="text-xs text-muted-foreground">{user?.name}</span>
 
+          {/* Account Manager Button */}
+          <button
+            onClick={() => setShowAccountManager(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title="계좌 관리"
+          >
+            <CreditCard size={12} />
+            <span className="hidden sm:inline">계좌</span>
+          </button>
+
           {/* KIS Settings Button */}
           <button
             onClick={() => setShowKisSettings(true)}
@@ -243,6 +256,7 @@ export default function Dashboard() {
               { id: "strategy" as RightTab, icon: Zap, label: "전략" },
               { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트" },
               { id: "screener" as RightTab, icon: Activity, label: "스크리너" },
+              { id: "performance" as RightTab, icon: TrendingUp, label: "성과" },
               { id: "telegram" as RightTab, icon: MessageSquare, label: "알림" },
               { id: "log" as RightTab, icon: FileText, label: "로그" },
             ] as const).map(({ id, icon: Icon, label }) => (
@@ -281,12 +295,20 @@ export default function Dashboard() {
                 onSelectStock={(code, name) => setSelectedStock({ code, name: name || code })}
               />
             )}
+            {rightTab === "performance" && (
+              <div className="overflow-y-auto h-full">
+                <PerformancePanel />
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* KIS Settings Modal */}
       {showKisSettings && <KisSettingsModal onClose={() => setShowKisSettings(false)} />}
+
+      {/* Account Manager Modal */}
+      {showAccountManager && <AccountManagerModal onClose={() => setShowAccountManager(false)} />}
     </div>
   );
 }

@@ -26,10 +26,11 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// KIS API 설정 (암호화된 appkey/appsecret 저장)
+// KIS API 설정 (암호화된 appkey/appsecret 저장) - 다중 계좌 지원
 export const kisSettings = mysqlTable("kis_settings", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
+  profileName: varchar("profileName", { length: 100 }).default("기본 계좌"), // 계좌 프로필 이름
   mode: mysqlEnum("mode", ["real", "paper"]).default("paper").notNull(), // 실전/모의
   encryptedAppKey: text("encryptedAppKey"),
   encryptedAppSecret: text("encryptedAppSecret"),
@@ -38,7 +39,8 @@ export const kisSettings = mysqlTable("kis_settings", {
   accessToken: text("accessToken"),
   tokenExpiredAt: timestamp("tokenExpiredAt"),
   wsApprovalKey: text("wsApprovalKey"),
-  isActive: boolean("isActive").default(false).notNull(),
+  isActive: boolean("isActive").default(false).notNull(), // 이 계좌가 현재 선택된 계좌
+  isDefault: boolean("isDefault").default(false).notNull(), // 기본 계좌
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

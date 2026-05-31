@@ -1,4 +1,4 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, gte } from "drizzle-orm";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -32,17 +32,99 @@ function checkRateLimit(key: string, maxRequests = 30, windowMs = 60_000): boole
 
 // ─── KIS Router ───────────────────────────────────────────────────────────────
 const kisRouter = router({
+  // 현재 활성 계좌 조회 (기존 호환)
   getSettings: protectedProcedure.query(async ({ ctx }) => {
     const db = await getDb();
     if (!db) return null;
-    const rows = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).limit(1);
-    if (!rows.length) return null;
+    const rows = await db.select().from(kisSettings)
+      .where(and(eq(kisSettings.userId, ctx.user.id), eq(kisSettings.isActive, true)))
+      .limit(1);
+    if (!rows.length) {
+      // fallback: 첫 번째 계좌
+      const all = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).limit(1);
+      if (!all.length) return null;
+      const s = all[0];
+      return { id: s.id, profileName: s.profileName, mode: s.mode, accountNo: s.accountNo, accountProduct: s.accountProduct, isActive: s.isActive, tokenExpiredAt: s.tokenExpiredAt, hasAppKey: !!s.encryptedAppKey, hasAppSecret: !!s.encryptedAppSecret };
+    }
     const s = rows[0];
-    return {
-      id: s.id, mode: s.mode, accountNo: s.accountNo, accountProduct: s.accountProduct,
-      isActive: s.isActive, tokenExpiredAt: s.tokenExpiredAt,
-      hasAppKey: !!s.encryptedAppKey, hasAppSecret: !!s.encryptedAppSecret,
-    };
+    return { id: s.id, profileName: s.profileName, mode: s.mode, accountNo: s.accountNo, accountProduct: s.accountProduct, isActive: s.isActive, tokenExpiredAt: s.tokenExpiredAt, hasAppKey: !!s.encryptedAppKey, hasAppSecret: !!s.encryptedAppSecret };
+  }),
+
+  // 전체 계좌 목록 조회
+  listAccounts: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).orderBy(kisSettings.createdAt);
+    return rows.map(s => ({ id: s.id, profileName: s.profileName, mode: s.mode, accountNo: s.accountNo, accountProduct: s.accountProduct, isActive: s.isActive, isDefault: s.isDefault, tokenExpiredAt: s.tokenExpiredAt, hasAppKey: !!s.encryptedAppKey, hasAppSecret: !!s.encryptedAppSecret }));
+  }),
+
+  // 계좌 추가 (saveSettings 확장 - profileName 지원)
+  addAccount: protectedProcedure.input(z.object({
+    profileName: z.string().min(1).default("기본 계좌"),
+    appKey: z.string().min(1),
+    appSecret: z.string().min(1),
+    accountNo: z.string().min(1),
+    accountProduct: z.string().default("01"),
+    mode: z.enum(["real", "paper"]),
+  })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const encryptedAppKey = encrypt(input.appKey);
+    const encryptedAppSecret = encrypt(input.appSecret);
+    const existing = await db.select({ id: kisSettings.id }).from(kisSettings).where(eq(kisSettings.userId, ctx.user.id));
+    const isFirst = existing.length === 0;
+    await db.insert(kisSettings).values({
+      userId: ctx.user.id, profileName: input.profileName,
+      encryptedAppKey, encryptedAppSecret,
+      accountNo: input.accountNo, accountProduct: input.accountProduct,
+      mode: input.mode, isDefault: isFirst, isActive: false,
+    });
+    return { success: true };
+  }),
+
+  // 계좌 수정
+  updateAccount: protectedProcedure.input(z.object({
+    id: z.number(),
+    profileName: z.string().min(1).optional(),
+    appKey: z.string().optional(),
+    appSecret: z.string().optional(),
+    accountNo: z.string().optional(),
+    accountProduct: z.string().optional(),
+    mode: z.enum(["real", "paper"]).optional(),
+  })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    const rows = await db.select().from(kisSettings).where(and(eq(kisSettings.id, input.id), eq(kisSettings.userId, ctx.user.id))).limit(1);
+    if (!rows.length) throw new Error("계좌를 찾을 수 없습니다");
+    const updateData: Record<string, unknown> = {};
+    if (input.profileName) updateData.profileName = input.profileName;
+    if (input.appKey) updateData.encryptedAppKey = encrypt(input.appKey);
+    if (input.appSecret) updateData.encryptedAppSecret = encrypt(input.appSecret);
+    if (input.accountNo) updateData.accountNo = input.accountNo;
+    if (input.accountProduct) updateData.accountProduct = input.accountProduct;
+    if (input.mode) updateData.mode = input.mode;
+    updateData.accessToken = null; updateData.tokenExpiredAt = null; updateData.isActive = false;
+    await db.update(kisSettings).set(updateData).where(eq(kisSettings.id, input.id));
+    return { success: true };
+  }),
+
+  // 계좌 삭제
+  deleteAccount: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    await db.delete(kisSettings).where(and(eq(kisSettings.id, input.id), eq(kisSettings.userId, ctx.user.id)));
+    return { success: true };
+  }),
+
+  // 계좌 전환 (선택된 계좌를 isActive=true로)
+  switchAccount: protectedProcedure.input(z.object({ id: z.number() })).mutation(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) throw new Error("DB unavailable");
+    // 모든 계좌 isActive=false
+    await db.update(kisSettings).set({ isActive: false, accessToken: null }).where(eq(kisSettings.userId, ctx.user.id));
+    // 선택 계좌 isActive=true
+    await db.update(kisSettings).set({ isActive: true }).where(and(eq(kisSettings.id, input.id), eq(kisSettings.userId, ctx.user.id)));
+    return { success: true };
   }),
 
   saveSettings: protectedProcedure.input(z.object({
@@ -224,6 +306,13 @@ const kisRouter = router({
     const db = await getDb();
     if (!db) return [];
     return db.select().from(orders).where(eq(orders.userId, ctx.user.id)).orderBy(desc(orders.orderedAt)).limit(input.limit);
+  }),
+
+  getOrderbook: protectedProcedure.input(z.object({ stockCode: z.string().min(1) })).query(async ({ ctx, input }) => {
+    if (!checkRateLimit(`orderbook:${ctx.user.id}`, 60, 60_000)) throw new Error("Rate limit exceeded");
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    return client.getOrderbook(input.stockCode);
   }),
 });
 
@@ -607,6 +696,126 @@ const settingsRouter = router({
   }),
 });
 
+// ─── Performance Router ─────────────────────────────────────────────────────
+const performanceRouter = router({
+  // 전략별 성과 집계
+  getStrategyStats: protectedProcedure.input(z.object({
+    days: z.number().default(90),
+  })).query(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const since = new Date(Date.now() - input.days * 86400_000);
+    const allOrders = await db.select().from(orders)
+      .where(and(eq(orders.userId, ctx.user.id), gte(orders.orderedAt, since)))
+      .orderBy(orders.orderedAt);
+
+    // 종목+전략별 매수-매도 페어링
+    type Trade = { strategyId: string; stockCode: string; buyPrice: number; sellPrice: number; qty: number; holdDays: number; pnl: number; pnlRate: number; date: string };
+    const trades: Trade[] = [];
+    // 종목+전략별 매수 대기열
+    const buyQueue = new Map<string, Array<{ price: number; qty: number; date: Date }>>(); // key: `${stockCode}_${strategyId}`
+
+    for (const o of allOrders) {
+      if (o.status === "cancelled" || o.status === "rejected") continue;
+      const ep = Number(o.executedPrice || o.price || 0);
+      const eq2 = o.executedQty || o.quantity;
+      const sid = o.strategyId || "manual";
+      const key = `${o.stockCode}_${sid}`;
+
+      if (o.orderType === "buy") {
+        const q = buyQueue.get(key) || [];
+        q.push({ price: ep, qty: eq2, date: o.orderedAt });
+        buyQueue.set(key, q);
+      } else if (o.orderType === "sell") {
+        const q = buyQueue.get(key) || [];
+        let remaining = eq2;
+        while (remaining > 0 && q.length > 0) {
+          const buy = q[0];
+          const matched = Math.min(remaining, buy.qty);
+          const holdMs = o.orderedAt.getTime() - buy.date.getTime();
+          const holdDays = Math.max(1, Math.round(holdMs / 86400_000));
+          const pnl = (ep - buy.price) * matched;
+          const pnlRate = buy.price > 0 ? ((ep - buy.price) / buy.price) * 100 : 0;
+          trades.push({ strategyId: sid, stockCode: o.stockCode, buyPrice: buy.price, sellPrice: ep, qty: matched, holdDays, pnl, pnlRate, date: o.orderedAt.toISOString().slice(0, 10) });
+          buy.qty -= matched;
+          remaining -= matched;
+          if (buy.qty <= 0) q.shift();
+        }
+        buyQueue.set(key, q);
+      }
+    }
+
+    // 전략별 집계
+    const statsMap = new Map<string, { strategyId: string; totalTrades: number; wins: number; totalPnl: number; totalPnlRate: number; avgHoldDays: number; maxDrawdown: number; trades: Trade[] }>();
+    for (const t of trades) {
+      const s = statsMap.get(t.strategyId) || { strategyId: t.strategyId, totalTrades: 0, wins: 0, totalPnl: 0, totalPnlRate: 0, avgHoldDays: 0, maxDrawdown: 0, trades: [] };
+      s.totalTrades++;
+      if (t.pnl > 0) s.wins++;
+      s.totalPnl += t.pnl;
+      s.totalPnlRate += t.pnlRate;
+      s.avgHoldDays += t.holdDays;
+      s.trades.push(t);
+      statsMap.set(t.strategyId, s);
+    }
+
+    return Array.from(statsMap.values()).map(s => ({
+      strategyId: s.strategyId,
+      totalTrades: s.totalTrades,
+      winRate: s.totalTrades > 0 ? Math.round((s.wins / s.totalTrades) * 100) : 0,
+      totalPnl: Math.round(s.totalPnl),
+      avgPnlRate: s.totalTrades > 0 ? parseFloat((s.totalPnlRate / s.totalTrades).toFixed(2)) : 0,
+      avgHoldDays: s.totalTrades > 0 ? parseFloat((s.avgHoldDays / s.totalTrades).toFixed(1)) : 0,
+      trades: s.trades.slice(-20), // 최근 20건
+    }));
+  }),
+
+  // 일별 수익 곡선
+  getDailyPnl: protectedProcedure.input(z.object({ days: z.number().default(90) })).query(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const since = new Date(Date.now() - input.days * 86400_000);
+    const allOrders = await db.select().from(orders)
+      .where(and(eq(orders.userId, ctx.user.id), eq(orders.orderType, "sell"), gte(orders.orderedAt, since)))
+      .orderBy(orders.orderedAt);
+    // 날짜별 실현 손익 집계 (매도주문 기준)
+    const dailyMap = new Map<string, number>();
+    for (const o of allOrders) {
+      if (o.status === "cancelled" || o.status === "rejected") continue;
+      const date = o.orderedAt.toISOString().slice(0, 10);
+      const ep = Number(o.executedPrice || o.price || 0);
+      const eq2 = o.executedQty || o.quantity;
+      dailyMap.set(date, (dailyMap.get(date) || 0) + ep * eq2);
+    }
+    return Array.from(dailyMap.entries()).map(([date, amount]) => ({ date, amount })).sort((a, b) => a.date.localeCompare(b.date));
+  }),
+
+  // 종목별 성과
+  getStockStats: protectedProcedure.input(z.object({ days: z.number().default(90) })).query(async ({ ctx, input }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const since = new Date(Date.now() - input.days * 86400_000);
+    const allOrders = await db.select().from(orders)
+      .where(and(eq(orders.userId, ctx.user.id), gte(orders.orderedAt, since)))
+      .orderBy(orders.orderedAt);
+    const stockMap = new Map<string, { stockCode: string; stockName: string; totalBuy: number; totalSell: number; qty: number }>();
+    for (const o of allOrders) {
+      if (o.status === "cancelled" || o.status === "rejected") continue;
+      const ep = Number(o.executedPrice || o.price || 0);
+      const eq2 = o.executedQty || o.quantity;
+      const s = stockMap.get(o.stockCode) || { stockCode: o.stockCode, stockName: o.stockName || o.stockCode, totalBuy: 0, totalSell: 0, qty: 0 };
+      if (o.orderType === "buy") { s.totalBuy += ep * eq2; s.qty += eq2; }
+      else { s.totalSell += ep * eq2; s.qty -= eq2; }
+      stockMap.set(o.stockCode, s);
+    }
+    return Array.from(stockMap.values()).map(s => ({
+      stockCode: s.stockCode,
+      stockName: s.stockName,
+      realizedPnl: Math.round(s.totalSell - s.totalBuy),
+      pnlRate: s.totalBuy > 0 ? parseFloat(((s.totalSell - s.totalBuy) / s.totalBuy * 100).toFixed(2)) : 0,
+    })).sort((a, b) => b.realizedPnl - a.realizedPnl).slice(0, 20);
+  }),
+});
+
 // ─── App Router ───────────────────────────────────────────────────────────────
 export const appRouter = router({
   system: systemRouter,
@@ -625,6 +834,7 @@ export const appRouter = router({
   backtest: backtestRouter,
   screener: screenerRouter,
   settings: settingsRouter,
+  performance: performanceRouter,
 });
 
 export type AppRouter = typeof appRouter;

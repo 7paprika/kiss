@@ -29,6 +29,13 @@
       "when": 1780194096180,
       "tag": "0003_furry_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1780199700213,
+      "tag": "0004_eager_sentinels",
+      "breakpoints": true
     }
   ]
 }

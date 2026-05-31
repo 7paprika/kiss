@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Wallet, ListOrdered, X, RefreshCw } from "lucide-react";
+import { Wallet, ListOrdered, X, RefreshCw, BookOpen } from "lucide-react";
+import OrderbookPanel from "./OrderbookPanel";
 
 interface Props {
   stockCode: string;
   stockName: string;
 }
 
-type OrderTab = "buy" | "sell" | "balance" | "pending";
+type OrderTab = "buy" | "sell" | "orderbook" | "balance" | "pending";
 
 export default function OrderPanel({ stockCode, stockName }: Props) {
   const [tab, setTab] = useState<OrderTab>("buy");
@@ -75,6 +76,7 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
   const tabs: { id: OrderTab; label: string }[] = [
     { id: "buy", label: "매수" },
     { id: "sell", label: "매도" },
+    { id: "orderbook", label: "호가" },
     { id: "balance", label: "잔고" },
     { id: "pending", label: "미체결" },
   ];
@@ -201,6 +203,17 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
             >
               {placeMutation.isPending ? "주문 중..." : tab === "buy" ? "매수" : "매도"}
             </button>
+          </div>
+        )}
+
+        {/* Orderbook */}
+        {tab === "orderbook" && (
+          <div className="flex-1 overflow-hidden" style={{ height: "calc(100% - 2rem)" }}>
+            <OrderbookPanel
+              stockCode={stockCode}
+              currentPrice={currentPrice?.currentPrice}
+              onPriceClick={(p) => { setPrice(String(p)); setPriceType("limit"); }}
+            />
           </div>
         )}
 
