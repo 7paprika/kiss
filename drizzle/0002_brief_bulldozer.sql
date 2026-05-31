@@ -1,0 +1,1 @@
+ALTER TABLE `auto_trader_config` ADD `scheduleCronTaskUid` varchar(65);

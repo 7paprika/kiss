@@ -8,6 +8,11 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { sdk } from "./sdk";
+import { heartbeatHandler } from "../autoTrader";
+import { getDb } from "../db";
+import { autoTraderConfig } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +41,28 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  // ─── Heartbeat: Auto-trading cycle (every 5 min during market hours) ───────
+  app.post("/api/scheduled/auto-trade", async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) {
+        return res.status(403).json({ error: "cron-only" });
+      }
+      // Find the auto trader config row by taskUid
+      const db = await getDb();
+      if (!db) return res.json({ ok: true, skipped: "no-db" });
+      const rows = await db.select().from(autoTraderConfig)
+        .where(eq(autoTraderConfig.scheduleCronTaskUid, user.taskUid)).limit(1);
+      if (!rows.length) return res.json({ ok: true, skipped: "orphan" });
+      const config = rows[0];
+      await heartbeatHandler(config.userId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[Heartbeat] auto-trade error:", err);
+      res.status(500).json({ error: String(err), timestamp: new Date().toISOString() });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",
