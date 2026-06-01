@@ -129,13 +129,18 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     time?: string; open?: number; high?: number; low?: number; close?: number; volume?: number;
   }>({});
 
-  const { data: ohlcv, isLoading } = trpc.kis.getOHLCV.useQuery(
+  const { data: kisSettings } = trpc.kis.getSettings.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const isKisActive = Boolean(kisSettings?.isActive);
+
+  const { data: ohlcv, isLoading, error: ohlcvError } = trpc.kis.getOHLCV.useQuery(
     { stockCode, period },
-    { enabled: !!stockCode, staleTime: 60_000 }
+    { enabled: !!stockCode && Boolean(kisSettings?.isActive), staleTime: 60_000, retry: false }
   );
 
   // Realtime tick: subscribe to live price via Socket.IO
-  const { quote: realtimeQuote } = useRealtimeQuote(stockCode);
+  const { quote: realtimeQuote } = useRealtimeQuote(kisSettings?.isActive ? stockCode : null);
 
   // Update the last candle bar when a realtime tick arrives
   useEffect(() => {
@@ -201,6 +206,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
 
   // Initialize main + volume chart
   useEffect(() => {
+    if (!isKisActive) return;
     if (!chartContainerRef.current || !volumeContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
@@ -264,10 +270,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       maSeriesRefs.current.clear(); bbSeriesRefs.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isKisActive]);
 
   // Initialize MACD chart
   useEffect(() => {
+    if (!isKisActive) return;
     if (!macdContainerRef.current || !indicators.has("macd")) return;
     if (macdChartRef.current) return; // already initialized
 
@@ -297,10 +304,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       macdSeriesRefs.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indicators.has("macd")]);
+  }, [isKisActive, indicators.has("macd")]);
 
   // Initialize Stochastic chart
   useEffect(() => {
+    if (!isKisActive) return;
     if (!stochContainerRef.current || !indicators.has("stoch")) return;
     if (stochChartRef.current) return;
 
@@ -329,10 +337,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       stochSeriesRefs.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indicators.has("stoch")]);
+  }, [isKisActive, indicators.has("stoch")]);
 
   // Update data
   useEffect(() => {
+    if (!isKisActive) return;
     if (!ohlcv || !candleSeriesRef.current || !volSeriesRef.current || !chartRef.current) return;
 
     const times = ohlcv.map((d) => `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}-${d.date.slice(6, 8)}` as Time);
@@ -448,7 +457,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     }
 
     chartRef.current.timeScale().fitContent();
-  }, [ohlcv, indicators]);
+  }, [isKisActive, ohlcv, indicators]);
 
   const last = ohlcv?.[ohlcv.length - 1];
   const prev = ohlcv?.[ohlcv.length - 2];
@@ -555,6 +564,20 @@ export default function TradingChart({ stockCode, stockName }: Props) {
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-card/80 z-10">
             <div className="text-muted-foreground text-xs">차트 로딩 중...</div>
+          </div>
+        )}
+        {!isKisActive && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-card/80 z-10 text-center px-6">
+            <BarChart2 size={36} className="text-muted-foreground opacity-30 mb-3" />
+            <div className="text-sm font-medium">KIS API를 연결하면 차트가 표시됩니다</div>
+            <div className="text-xs text-muted-foreground mt-1">API 설정에서 계좌를 연결한 뒤 다시 종목을 선택하세요.</div>
+          </div>
+        )}
+        {isKisActive && ohlcvError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-card/80 z-10 text-center px-6">
+            <BarChart2 size={36} className="text-muted-foreground opacity-30 mb-3" />
+            <div className="text-sm font-medium">차트 데이터를 불러오지 못했습니다</div>
+            <div className="text-xs text-muted-foreground mt-1">{ohlcvError.message}</div>
           </div>
         )}
         <div ref={chartContainerRef} className="w-full h-full" />

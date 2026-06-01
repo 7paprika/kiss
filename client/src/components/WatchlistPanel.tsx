@@ -18,6 +18,10 @@ export default function WatchlistPanel({ selectedCode, onSelect }: Props) {
 
   const utils = trpc.useUtils();
   const { data: watchlist = [] } = trpc.watchlist.list.useQuery();
+  const { data: kisSettings } = trpc.kis.getSettings.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const isKisActive = Boolean(kisSettings?.isActive);
 
   const reorderMutation = trpc.watchlist.reorder.useMutation({
     onSuccess: () => utils.watchlist.list.invalidate(),
@@ -153,6 +157,7 @@ export default function WatchlistPanel({ selectedCode, onSelect }: Props) {
             <WatchlistItem
               key={item.id}
               item={item}
+              isKisActive={isKisActive}
               isSelected={selectedCode === item.stockCode}
               onSelect={() => onSelect(item.stockCode, item.stockName || item.stockCode)}
               onRemove={() => removeMutation.mutate({ id: item.id })}
@@ -169,6 +174,7 @@ export default function WatchlistPanel({ selectedCode, onSelect }: Props) {
 
 function WatchlistItem({
   item,
+  isKisActive,
   isSelected,
   onSelect,
   onRemove,
@@ -177,6 +183,7 @@ function WatchlistItem({
   onMoveDown,
 }: {
   item: { id: number; stockCode: string; stockName: string | null; isAutoTrading: boolean };
+  isKisActive: boolean;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
@@ -185,11 +192,11 @@ function WatchlistItem({
   onMoveDown?: () => void;
 }) {
   // Use Socket.IO realtime quote (5s polling fallback)
-  const { quote: realtimeQuote } = useRealtimeQuote(item.stockCode);
+  const { quote: realtimeQuote } = useRealtimeQuote(isKisActive ? item.stockCode : null);
   // REST fallback for initial load
   const { data: restPrice } = trpc.kis.getCurrentPrice.useQuery(
     { stockCode: item.stockCode },
-    { refetchInterval: realtimeQuote ? false : 10000, retry: false }
+    { enabled: isKisActive, refetchInterval: realtimeQuote ? false : 10000, retry: false }
   );
 
   const price = realtimeQuote

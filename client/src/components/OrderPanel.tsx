@@ -18,17 +18,21 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
   const [quantity, setQuantity] = useState("");
 
   const utils = trpc.useUtils();
+  const { data: kisSettings } = trpc.kis.getSettings.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const isKisActive = Boolean(kisSettings?.isActive);
   const { data: currentPrice } = trpc.kis.getCurrentPrice.useQuery(
     { stockCode },
-    { enabled: !!stockCode, refetchInterval: 3000 }
+    { enabled: isKisActive && !!stockCode, refetchInterval: 3000, retry: false }
   );
   const { data: balance, refetch: refetchBalance } = trpc.kis.getBalance.useQuery(
     undefined,
-    { enabled: tab === "balance", staleTime: 10_000 }
+    { enabled: isKisActive && tab === "balance", staleTime: 10_000, retry: false }
   );
   const { data: pendingOrders, refetch: refetchPending } = trpc.kis.getPendingOrders.useQuery(
     undefined,
-    { enabled: tab === "pending", refetchInterval: 10_000 }
+    { enabled: isKisActive && tab === "pending", refetchInterval: 10_000, retry: false }
   );
 
   const placeMutation = trpc.kis.placeOrder.useMutation({
@@ -51,6 +55,7 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
   });
 
   const handleOrder = (orderType: "buy" | "sell") => {
+    if (!isKisActive) { toast.error("KIS API 연결 후 주문할 수 있습니다"); return; }
     const qty = parseInt(quantity);
     if (!qty || qty <= 0) { toast.error("수량을 입력하세요"); return; }
     if (priceType === "limit" && (!price || parseFloat(price) <= 0)) {
@@ -211,6 +216,7 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
           <div className="flex-1 overflow-hidden" style={{ height: "calc(100% - 2rem)" }}>
             <OrderbookPanel
               stockCode={stockCode}
+              isKisActive={isKisActive}
               currentPrice={currentPrice?.currentPrice}
               onPriceClick={(p) => { setPrice(String(p)); setPriceType("limit"); }}
             />
@@ -222,7 +228,7 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
           <div className="space-y-2">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs text-muted-foreground">보유 종목</span>
-              <button onClick={() => refetchBalance()} className="text-muted-foreground hover:text-foreground">
+              <button disabled={!isKisActive} onClick={() => refetchBalance()} className="text-muted-foreground hover:text-foreground disabled:opacity-40">
                 <RefreshCw size={12} />
               </button>
             </div>
@@ -279,7 +285,7 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
           <div className="space-y-2">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs text-muted-foreground">미체결 주문</span>
-              <button onClick={() => refetchPending()} className="text-muted-foreground hover:text-foreground">
+              <button disabled={!isKisActive} onClick={() => refetchPending()} className="text-muted-foreground hover:text-foreground disabled:opacity-40">
                 <RefreshCw size={12} />
               </button>
             </div>

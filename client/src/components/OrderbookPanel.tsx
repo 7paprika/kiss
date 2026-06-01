@@ -10,17 +10,19 @@ import { cn } from "@/lib/utils";
 
 interface OrderbookPanelProps {
   stockCode: string;
+  isKisActive: boolean;
   currentPrice?: number;
   onPriceClick?: (price: number) => void;
 }
 
-export default function OrderbookPanel({ stockCode, currentPrice, onPriceClick }: OrderbookPanelProps) {
+export default function OrderbookPanel({ stockCode, isKisActive, currentPrice, onPriceClick }: OrderbookPanelProps) {
   const { data, isLoading, refetch, dataUpdatedAt } = trpc.kis.getOrderbook.useQuery(
     { stockCode },
     {
-      enabled: !!stockCode,
+      enabled: isKisActive && !!stockCode,
       refetchInterval: 3000,
       staleTime: 2000,
+      retry: false,
     }
   );
 
@@ -42,6 +44,14 @@ export default function OrderbookPanel({ stockCode, currentPrice, onPriceClick }
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
         종목을 선택하세요
+      </div>
+    );
+  }
+
+  if (!isKisActive) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
+        <p className="text-sm">KIS API 연결 후 호가 조회 가능</p>
       </div>
     );
   }
