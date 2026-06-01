@@ -54,4 +54,10 @@ describe("chart compatibility", () => {
     expect(source.match(/utils\.kis\.listAccounts\.invalidate\(\)/g)?.length).toBeGreaterThanOrEqual(2);
     expect(source).toContain("KIS API 연결 성공");
   });
+
+  it("connects the account selected in account manager", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/AccountManagerModal.tsx"), "utf8");
+
+    expect(source).toContain("connectMutation.mutate({ id: acc.id })");
+  });
 });

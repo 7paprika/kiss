@@ -110,7 +110,7 @@ const kisRouter = router({
     if (input.accountNo) updateData.accountNo = input.accountNo;
     if (input.accountProduct) updateData.accountProduct = input.accountProduct;
     if (input.mode) updateData.mode = input.mode;
-    updateData.accessToken = null; updateData.tokenExpiredAt = null; updateData.isActive = false;
+    updateData.accessToken = null; updateData.tokenExpiredAt = null;
     await db.update(kisSettings).set(updateData).where(eq(kisSettings.id, input.id));
     return { success: true };
   }),
@@ -154,7 +154,7 @@ const kisRouter = router({
         accountNo,
         accountProduct: input.accountProduct,
         mode: input.mode,
-        isActive: false,
+        isActive: true,
         accessToken: null,
         tokenExpiredAt: null,
       };
@@ -170,19 +170,25 @@ const kisRouter = router({
         userId: ctx.user.id, encryptedAppKey, encryptedAppSecret,
         accountNo, accountProduct: input.accountProduct,
         mode: input.mode,
+        isActive: true,
       });
     }
     return { success: true };
   }),
 
-  connect: protectedProcedure.mutation(async ({ ctx }) => {
+  connect: protectedProcedure.input(z.object({ id: z.number().optional() }).optional()).mutation(async ({ ctx, input }) => {
     if (!checkRateLimit(`kis-connect-${ctx.user.id}`, 5, 60_000)) {
       throw new Error("요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
     }
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
 
-    const rows = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).limit(1);
+    let rows = input?.id
+      ? await db.select().from(kisSettings).where(and(eq(kisSettings.userId, ctx.user.id), eq(kisSettings.id, input.id))).limit(1)
+      : await db.select().from(kisSettings).where(and(eq(kisSettings.userId, ctx.user.id), eq(kisSettings.isActive, true))).limit(1);
+    if (!rows.length && !input?.id) {
+      rows = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).limit(1);
+    }
     if (!rows.length) throw new Error("API 설정이 없습니다");
 
     const setting = rows[0];
@@ -202,9 +208,10 @@ const kisRouter = router({
     client.setToken(tokenRes.access_token, expiredAt);
     setKisClient(ctx.user.id, client);
 
+    await db.update(kisSettings).set({ isActive: false }).where(eq(kisSettings.userId, ctx.user.id));
     await db.update(kisSettings).set({
       accessToken: tokenRes.access_token, tokenExpiredAt: expiredAt, isActive: true,
-    }).where(eq(kisSettings.userId, ctx.user.id));
+    }).where(and(eq(kisSettings.userId, ctx.user.id), eq(kisSettings.id, setting.id)));
 
     return { success: true, expiredAt };
   }),

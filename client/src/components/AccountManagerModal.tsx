@@ -234,7 +234,7 @@ export default function AccountManagerModal({ onClose }: Props) {
                             variant="outline"
                             size="sm"
                             className="h-7 text-xs px-2 border-primary/50 text-primary"
-                            onClick={() => connectMutation.mutate()}
+                            onClick={() => connectMutation.mutate({ id: acc.id })}
                             disabled={connectMutation.isPending}
                             title="재연결"
                           >

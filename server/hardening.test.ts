@@ -121,6 +121,16 @@ describe("KIS access token refresh", () => {
   });
 });
 
+describe("OAuth optional mode", () => {
+  it("does not emit startup OAuth configuration warnings when OAuth is unused", async () => {
+    const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("./_core/sdk.ts", import.meta.url), "utf-8"));
+
+    expect(source).not.toContain("[OAuth] Initialized with baseURL");
+    expect(source).not.toContain("OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable.");
+    expect(source).toContain("OAuth login is disabled: OAUTH_SERVER_URL is not configured");
+  });
+});
+
 describe("KIS settings update semantics", () => {
   it("allows keeping stored app credentials when saving account metadata", async () => {
     const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("./routers.ts", import.meta.url), "utf-8"));
@@ -132,6 +142,17 @@ describe("KIS settings update semantics", () => {
     expect(saveSettingsBlock).toContain("if (appSecret) updateData.encryptedAppSecret = encrypt(appSecret)");
     expect(saveSettingsBlock).toContain("if (!appKey) throw new Error(\"App Key를 입력하세요\")");
     expect(saveSettingsBlock).toContain("if (!appSecret) throw new Error(\"App Secret을 입력하세요\")");
+    expect(saveSettingsBlock).toContain("isActive: true");
+    expect(saveSettingsBlock).not.toContain("isActive: false");
+  });
+
+  it("connects the selected active or requested KIS account instead of blindly using the first row", async () => {
+    const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("./routers.ts", import.meta.url), "utf-8"));
+    const connectBlock = source.slice(source.indexOf("connect: protectedProcedure"), source.indexOf("disconnect: protectedProcedure"));
+
+    expect(connectBlock).toContain("z.object({ id: z.number().optional() }).optional()");
+    expect(connectBlock).toContain("eq(kisSettings.isActive, true)");
+    expect(connectBlock).toContain("eq(kisSettings.id, setting.id)");
   });
 });
 
