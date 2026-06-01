@@ -23,6 +23,26 @@ export default function ScreenerPanel({ onSelectStock }: ScreenerPanelProps) {
   const [manualCodes, setManualCodes] = useState("");
   const [manualStrategyId, setManualStrategyId] = useState("bollinger_trading");
   const [isExpanded, setIsExpanded] = useState(true);
+  const [universeResults, setUniverseResults] = useState<{
+    scanned: number;
+    filtered: number;
+    excluded: number;
+    groups: Array<{
+      strategyId: string;
+      strategyName: string;
+      matches: Array<{
+        stockCode: string;
+        stockName: string;
+        market: string;
+        signal: "BUY" | "SELL" | "HOLD";
+        strength: number;
+        reason: string;
+        priceAtScan: number;
+        volume: number;
+        amount: number;
+      }>;
+    }>;
+  } | null>(null);
   const [manualResults, setManualResults] = useState<Array<{
     stockCode: string;
     signal: "BUY" | "SELL" | "HOLD";
@@ -50,6 +70,15 @@ export default function ScreenerPanel({ onSelectStock }: ScreenerPanelProps) {
       toast.success(`스크리너 완료: ${results.length}개 종목 분석`);
     },
     onError: (err) => toast.error(`스크리너 실패: ${err.message}`),
+  });
+
+  const runUniverseMutation = trpc.screener.runUniverse.useMutation({
+    onSuccess: (results) => {
+      setUniverseResults(results);
+      const totalMatches = results.groups.reduce((sum, group) => sum + group.matches.length, 0);
+      toast.success(`전체종목 스캔 완료: 전략 조건 매칭 ${totalMatches}개`);
+    },
+    onError: (err) => toast.error(`전체종목 스캔 실패: ${err.message}`),
   });
 
   // 관심종목 추가
@@ -134,6 +163,58 @@ export default function ScreenerPanel({ onSelectStock }: ScreenerPanelProps) {
           {/* Manual Screener */}
           <div className="px-3 py-2 border-b border-slate-700/30 space-y-2">
             <div className="text-xs text-slate-500 font-medium">수동 스크리너</div>
+            <div className="rounded border border-blue-500/20 bg-blue-500/5 p-2 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs text-blue-300 font-medium">전체종목 전략별 조건 조회</div>
+                  <div className="text-[10px] text-slate-500">저거래량·관리/주의·동전주·ETF/ETN·스팩·리츠·우선주 제외 후 각 전략의 현재 매수 조건을 보여줍니다.</div>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 shrink-0"
+                  onClick={() => runUniverseMutation.mutate({ maxQuoteScan: 600, maxOhlcvFetch: 120, maxPerStrategy: 10 })}
+                  disabled={runUniverseMutation.isPending}
+                >
+                  {runUniverseMutation.isPending ? <RefreshCw className="w-3 h-3 animate-spin" /> : "전체 스캔"}
+                </Button>
+              </div>
+              {universeResults && (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  <div className="text-[10px] text-slate-500">
+                    시세조회 {universeResults.scanned.toLocaleString()}개 · 필터통과 {universeResults.filtered.toLocaleString()}개 · 제외 {universeResults.excluded.toLocaleString()}개
+                  </div>
+                  {universeResults.groups.map(group => (
+                    <div key={group.strategyId} className="rounded bg-slate-900/60 border border-slate-700/40 p-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-slate-200">{group.strategyName}</span>
+                        <span className="text-[10px] text-slate-500">{group.matches.length}개</span>
+                      </div>
+                      {group.matches.length === 0 ? (
+                        <div className="text-[10px] text-slate-600">현재 조건에 맞는 종목 없음</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {group.matches.map(match => (
+                            <button
+                              key={`${group.strategyId}-${match.stockCode}`}
+                              className="w-full flex items-center justify-between gap-2 rounded px-2 py-1 bg-slate-800/50 hover:bg-slate-700/60 text-left"
+                              onClick={() => onSelectStock?.(match.stockCode, match.stockName)}
+                            >
+                              <span className="min-w-0">
+                                <span className="text-xs font-mono text-slate-200 mr-1">{match.stockCode}</span>
+                                <span className="text-xs text-slate-400 truncate">{match.stockName}</span>
+                                <span className="block text-[10px] text-slate-600 truncate">{match.reason}</span>
+                              </span>
+                              <span className="text-[10px] text-emerald-300 shrink-0">{(match.strength * 100).toFixed(0)}%</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="text-xs text-slate-500 font-medium">종목코드 직접 스크리너</div>
             <div className="flex gap-1">
               <Input
                 value={manualCodes}

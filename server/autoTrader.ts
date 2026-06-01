@@ -18,6 +18,8 @@ import { KisApiClient, getKisClient } from "./kisApi";
 import { decrypt } from "./crypto";
 import { getSelectionStrategy, getTradingStrategy } from "./strategies/index";
 import { sendTelegramMessage } from "./telegram";
+import { DEFAULT_UNIVERSE_FILTERS, applyUniverseExclusions, normalizeUniverseStock } from "./universeScreener";
+import { loadKrxStocks } from "./stockSearch";
 
 // ─── Logger ──────────────────────────────────────────────────────────────────
 
@@ -474,31 +476,51 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
     }
   }
 
-  // Get watchlist
-  const watchlistItems = await db.select().from(watchlist).where(
-    and(eq(watchlist.userId, userId), eq(watchlist.isAutoTrading, true))
-  );
+  // Build whole-market universe, then run selection strategy on filtered candidates.
+  const listedStocks = (await loadKrxStocks()).map(normalizeUniverseStock).filter((stock) => stock.market !== "KONEX");
+  const quoteRows = [];
+  const maxQuoteScan = 600;
+  for (const stock of listedStocks.slice(0, maxQuoteScan)) {
+    try {
+      const detail = await client.getCurrentPriceDetail(stock.code);
+      quoteRows.push({
+        ...stock,
+        name: detail.name || stock.name,
+        price: detail.price,
+        volume: detail.volume,
+        amount: detail.amount,
+        statusCode: detail.statusCode,
+        warningCode: detail.warningCode,
+        halted: detail.halted,
+      });
+    } catch {
+      await log(userId, "warn", `${stock.code} 현재가 조회 실패`, stock.code);
+    }
+  }
+  const filteredUniverse = applyUniverseExclusions(quoteRows, DEFAULT_UNIVERSE_FILTERS).included
+    .sort((a, b) => b.amount - a.amount || b.volume - a.volume);
 
-  if (!watchlistItems.length) {
-    await log(userId, "info", "자동매매 대상 관심종목이 없습니다");
+  if (!filteredUniverse.length) {
+    await log(userId, "info", "전체종목 필터 통과 후보가 없습니다");
     return;
   }
 
-  // Fetch OHLCV for all watchlist items
+  const stockNameMap = new Map(filteredUniverse.map((stock) => [stock.code, stock.name]));
   const candidates: Array<{ code: string; ohlcv: Awaited<ReturnType<KisApiClient["getOHLCV"]>> }> = [];
-  for (const item of watchlistItems) {
+  const maxOhlcvFetch = 120;
+  for (const item of filteredUniverse.slice(0, maxOhlcvFetch)) {
     try {
-      const ohlcv = await client.getOHLCV(item.stockCode, "D");
-      candidates.push({ code: item.stockCode, ohlcv });
-    } catch (err) {
-      await log(userId, "warn", `${item.stockCode} OHLCV 조회 실패`, item.stockCode);
+      const ohlcv = await client.getOHLCV(item.code, "D");
+      candidates.push({ code: item.code, ohlcv });
+    } catch {
+      await log(userId, "warn", `${item.code} OHLCV 조회 실패`, item.code);
     }
   }
 
   // Run selection strategy
   const selectionParams = (selectionConfig.params as Record<string, number | string | boolean>) || selectionStrategy.meta.defaultParams;
   const selected = selectionStrategy.select(candidates, selectionParams);
-  await log(userId, "info", `종목 선정 완료: ${selected.length}개 선정`, undefined, selectionConfig.strategyId);
+  await log(userId, "info", `전체종목 스캔 완료: ${listedStocks.length}개 중 ${quoteRows.length}개 시세 조회, ${filteredUniverse.length}개 필터 통과, ${selected.length}개 선정`, undefined, selectionConfig.strategyId);
 
   // Run trading strategy for each selected stock
   const tradingParams = (tradingConfig.params as Record<string, number | string | boolean>) || tradingStrategy.meta.defaultParams;
@@ -515,14 +537,14 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
 
     const signal = tradingStrategy.evaluate(candidate.ohlcv, tradingParams);
     const lastBar = candidate.ohlcv[candidate.ohlcv.length - 1];
-    const stockItem = watchlistItems.find(w => w.stockCode === result.stockCode);
+    const stockName = stockNameMap.get(result.stockCode) || result.stockCode;
 
     // Save screener result to DB
     await saveScreenerResult({
       userId,
       runDate: today,
       stockCode: result.stockCode,
-      stockName: stockItem?.stockName || result.stockCode,
+      stockName,
       strategyId: tradingConfig.strategyId,
       strategyName: tradingStrategy.meta.name,
       signal: signal.signal,
@@ -582,12 +604,10 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
 
         const orderResult = await client.placeOrder(result.stockCode, "buy", quantity, currentPrice, "market");
 
-        // Save order to DB
-        const stockItem = watchlistItems.find(w => w.stockCode === result.stockCode);
         await db.insert(orders).values({
           userId,
           stockCode: result.stockCode,
-          stockName: stockItem?.stockName || result.stockCode,
+          stockName,
           orderType: "buy",
           priceType: "market",
           quantity,
@@ -623,11 +643,10 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
         const currentPrice = candidate.ohlcv[candidate.ohlcv.length - 1].close;
         const orderResult = await client.placeOrder(result.stockCode, "sell", holding.holdQty, currentPrice, "market");
 
-        const stockItem = watchlistItems.find(w => w.stockCode === result.stockCode);
         await db.insert(orders).values({
           userId,
           stockCode: result.stockCode,
-          stockName: stockItem?.stockName || result.stockCode,
+          stockName,
           orderType: "sell",
           priceType: "market",
           quantity: holding.holdQty,

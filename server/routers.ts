@@ -21,6 +21,7 @@ import { createHeartbeatJob, deleteHeartbeatJob } from "./_core/heartbeat";
 import { AUTO_TRADE_MARKET_CRON_UTC } from "./autoTradeSchedule";
 import { calculateDailyRealizedPnl } from "./performance";
 import { searchStocks } from "./stockSearch";
+import { buildWholeMarketUniverse, DEFAULT_UNIVERSE_FILTERS } from "./universeScreener";
 import { evaluatePasswordLogin, loadPasswordAuthState, savePasswordAuthState } from "./_core/appPasswordAuth";
 import { sdk } from "./_core/sdk";
 import { parse as parseCookie } from "cookie";
@@ -707,6 +708,33 @@ const screenerRouter = router({
       } catch { results.push({ stockCode: code, signal: "HOLD" as const, strength: 0, reason: "조회 실패", priceAtScan: 0 }); }
     }
     return results;
+  }),
+
+  runUniverse: protectedProcedure.input(z.object({
+    maxQuoteScan: z.number().int().min(50).max(1000).default(600),
+    maxOhlcvFetch: z.number().int().min(20).max(200).default(120),
+    maxPerStrategy: z.number().int().min(1).max(30).default(10),
+    strategyIds: z.array(z.string()).optional(),
+    minPrice: z.number().min(0).default(DEFAULT_UNIVERSE_FILTERS.minPrice),
+    minVolume: z.number().min(0).default(DEFAULT_UNIVERSE_FILTERS.minVolume),
+    minAmount: z.number().min(0).default(DEFAULT_UNIVERSE_FILTERS.minAmount),
+  })).mutation(async ({ ctx, input }) => {
+    if (!checkRateLimit(`universe-screener:${ctx.user.id}`, 2, 60_000)) throw new Error("전체종목 스크리너 요청이 너무 많습니다. 1분 후 다시 시도해주세요.");
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    return buildWholeMarketUniverse({
+      client,
+      maxQuoteScan: input.maxQuoteScan,
+      maxOhlcvFetch: input.maxOhlcvFetch,
+      maxPerStrategy: input.maxPerStrategy,
+      strategyIds: input.strategyIds,
+      filters: {
+        ...DEFAULT_UNIVERSE_FILTERS,
+        minPrice: input.minPrice,
+        minVolume: input.minVolume,
+        minAmount: input.minAmount,
+      },
+    });
   }),
 });
 

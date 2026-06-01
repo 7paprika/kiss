@@ -56,6 +56,17 @@ export interface KisCurrentPrice {
   prevClosePrice: number;
 }
 
+export interface KisCurrentPriceDetail extends KisCurrentPrice {
+  code: string;
+  name: string;
+  market: string;
+  price: number;
+  amount: number;
+  statusCode?: string;
+  warningCode?: string;
+  halted?: boolean;
+}
+
 export interface KisBalance {
   stockCode: string;
   stockName: string;
@@ -255,6 +266,23 @@ export class KisApiClient {
 
   // 주식 현재가 시세 조회
   async getCurrentPrice(stockCode: string): Promise<KisCurrentPrice> {
+    const detail = await this.getCurrentPriceDetail(stockCode);
+    return {
+      stockCode: detail.stockCode,
+      stockName: detail.stockName,
+      currentPrice: detail.currentPrice,
+      changePrice: detail.changePrice,
+      changeRate: detail.changeRate,
+      volume: detail.volume,
+      openPrice: detail.openPrice,
+      highPrice: detail.highPrice,
+      lowPrice: detail.lowPrice,
+      prevClosePrice: detail.prevClosePrice,
+    };
+  }
+
+  // 주식 현재가 + 전체시장 필터용 원시 상태 정보
+  async getCurrentPriceDetail(stockCode: string): Promise<KisCurrentPriceDetail> {
     const data = await this.request<{ output: Record<string, string> }>(
       "GET",
       "/uapi/domestic-stock/v1/quotations/inquire-price",
@@ -262,17 +290,31 @@ export class KisApiClient {
       { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: stockCode }
     );
     const o = data.output;
+    const currentPrice = Number(o.stck_prpr);
+    const volume = Number(o.acml_vol);
+    const stockName = o.hts_kor_isnm || "";
+    const statusCode = o.iscd_stat_cls_code || o.stck_stat_cls_code || o.mrkt_warn_cls_code || undefined;
+    const warningCode = o.mrkt_warn_cls_code || o.invt_caful_yn || undefined;
+    const halted = [o.trht_yn, o.halt_yn, o.tr_susp_yn].some((value) => value === "Y" || value === "1");
     return {
       stockCode,
-      stockName: o.hts_kor_isnm || "",
-      currentPrice: Number(o.stck_prpr),
+      code: stockCode,
+      stockName,
+      name: stockName,
+      market: "KRX",
+      currentPrice,
+      price: currentPrice,
       changePrice: Number(o.prdy_vrss),
       changeRate: Number(o.prdy_ctrt),
-      volume: Number(o.acml_vol),
+      volume,
+      amount: Number(o.acml_tr_pbmn || 0) || currentPrice * volume,
       openPrice: Number(o.stck_oprc),
       highPrice: Number(o.stck_hgpr),
       lowPrice: Number(o.stck_lwpr),
       prevClosePrice: Number(o.stck_sdpr),
+      statusCode,
+      warningCode,
+      halted,
     };
   }
 
