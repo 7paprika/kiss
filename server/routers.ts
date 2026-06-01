@@ -20,6 +20,7 @@ import { runGridSearch, STRATEGY_PARAM_SPACES } from "./optimizer";
 import { createHeartbeatJob, deleteHeartbeatJob } from "./_core/heartbeat";
 import { AUTO_TRADE_MARKET_CRON_UTC } from "./autoTradeSchedule";
 import { calculateDailyRealizedPnl } from "./performance";
+import { searchStocks } from "./stockSearch";
 import { evaluatePasswordLogin, loadPasswordAuthState, savePasswordAuthState } from "./_core/appPasswordAuth";
 import { sdk } from "./_core/sdk";
 import { parse as parseCookie } from "cookie";
@@ -303,6 +304,9 @@ const kisRouter = router({
   }),
 
   searchStock: protectedProcedure.input(z.object({ keyword: z.string() })).query(async ({ ctx, input }) => {
+    const localResults = await searchStocks(input.keyword);
+    if (localResults.length > 0) return localResults;
+
     const client = await initKisClientForUser(ctx.user.id);
     if (!client) return [];
     return client.searchStock(input.keyword);
