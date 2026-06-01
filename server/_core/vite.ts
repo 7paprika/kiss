@@ -58,6 +58,14 @@ export function serveStatic(app: Express) {
     );
   }
 
+  app.use((req, res, next) => {
+    if (req.url.includes("VITE_ANALYTICS_ENDPOINT")) {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
