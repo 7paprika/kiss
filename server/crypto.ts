@@ -3,7 +3,13 @@ import { ENV } from "./_core/env";
 
 // JWT_SECRET을 암호화 키로 활용 (서버사이드 전용)
 function getEncryptionKey(): string {
-  return ENV.cookieSecret || "kis-auto-trader-default-key-change-me";
+  if (!ENV.cookieSecret) {
+    if (ENV.isProduction) {
+      throw new Error("JWT_SECRET is required for credential encryption in production");
+    }
+    return "kis-auto-trader-development-key-change-me";
+  }
+  return ENV.cookieSecret;
 }
 
 export function encrypt(plainText: string): string {

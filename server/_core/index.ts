@@ -14,6 +14,7 @@ import { setupRealtimeServer } from "../realtime";
 import { getDb } from "../db";
 import { autoTraderConfig } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
+import { isKoreanMarketHours } from "../autoTradeSchedule";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -50,6 +51,9 @@ async function startServer() {
       const user = await sdk.authenticateRequest(req);
       if (!user.isCron || !user.taskUid) {
         return res.status(403).json({ error: "cron-only" });
+      }
+      if (!isKoreanMarketHours()) {
+        return res.json({ ok: true, skipped: "outside-market-hours" });
       }
       // Find the auto trader config row by taskUid
       const db = await getDb();

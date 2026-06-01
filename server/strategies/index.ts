@@ -289,14 +289,15 @@ export const bollingerTradingStrategy: ITradingStrategy = {
 
     const pctB = (price - last.lower) / (last.upper - last.lower);
     const prevPctB = (prevPrice - prevBand.lower) / (prevBand.upper - prevBand.lower);
+    const clampStrength = (value: number) => Math.max(0, Math.min(value, 1));
 
     // 하단 이탈 후 반등 진입
     if (prevPctB <= 0.05 && pctB > 0.05) {
-      return { signal: "BUY", strength: 1 - pctB, reason: `볼린저 하단 반등 (pctB: ${pctB.toFixed(2)})`, indicators: { pctB, upper: last.upper, middle: last.middle, lower: last.lower } };
+      return { signal: "BUY", strength: clampStrength(1 - pctB), reason: `볼린저 하단 반등 (pctB: ${pctB.toFixed(2)})`, indicators: { pctB, upper: last.upper, middle: last.middle, lower: last.lower } };
     }
     // 상단 도달 청산
     if (pctB >= 0.95) {
-      return { signal: "SELL", strength: pctB, reason: `볼린저 상단 도달 (pctB: ${pctB.toFixed(2)})`, indicators: { pctB, upper: last.upper, middle: last.middle, lower: last.lower } };
+      return { signal: "SELL", strength: clampStrength(pctB), reason: `볼린저 상단 도달 (pctB: ${pctB.toFixed(2)})`, indicators: { pctB, upper: last.upper, middle: last.middle, lower: last.lower } };
     }
     return { signal: "HOLD", strength: 0.5, reason: `볼린저 중립 (pctB: ${pctB.toFixed(2)})` };
   },

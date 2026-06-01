@@ -182,6 +182,22 @@ export class KisApiClient {
     return res.data as KisTokenResponse;
   }
 
+  private parseTokenExpiry(token: KisTokenResponse): Date {
+    const explicitExpiry = token.access_token_token_expired?.replace(" ", "T");
+    if (explicitExpiry) {
+      const parsed = new Date(explicitExpiry);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date(Date.now() + Math.max(0, token.expires_in || 0) * 1000);
+  }
+
+  async ensureAccessToken(): Promise<string> {
+    if (this.isTokenValid()) return this.accessToken;
+    const token = await this.getAccessToken();
+    this.setToken(token.access_token, this.parseTokenExpiry(token));
+    return this.accessToken;
+  }
+
   // WebSocket 접속키 발급
   async getWsApprovalKey(): Promise<string> {
     const res = await axios.post(
@@ -204,6 +220,7 @@ export class KisApiClient {
     body?: Record<string, unknown>
   ): Promise<T> {
     await rateLimiter.acquire();
+    await this.ensureAccessToken();
     const headers: Record<string, string> = {
       authorization: `Bearer ${this.accessToken}`,
       appkey: this.credentials.appKey,

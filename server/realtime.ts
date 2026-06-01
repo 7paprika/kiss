@@ -14,7 +14,8 @@ import { getDb } from "./db";
 import { kisSettings } from "../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { decrypt } from "./crypto";
-import { getKisClient, KisApiClient } from "./kisApi";
+import { KisApiClient } from "./kisApi";
+import { sdk } from "./_core/sdk";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,13 +68,27 @@ export function setupRealtimeServer(httpServer: HttpServer) {
     transports: ["websocket", "polling"],
   });
 
+  io.use(async (socket, next) => {
+    try {
+      const user = await sdk.authenticateRequest(socket.request as any);
+      if (user.isCron) return next(new Error("unauthorized"));
+      socket.data.userId = user.id;
+      next();
+    } catch {
+      next(new Error("unauthorized"));
+    }
+  });
+
   io.on("connection", (socket: Socket) => {
     console.log(`[Realtime] Client connected: ${socket.id}`);
-    let userId: number | null = null;
+    let userId: number | null = socket.data.userId ?? null;
 
-    // Authenticate via userId passed from client
-    socket.on("auth", (data: { userId: number }) => {
-      userId = data.userId;
+    // Auth event kept for client compatibility; the server ignores client-supplied IDs.
+    socket.on("auth", () => {
+      if (!userId) {
+        socket.emit("error", { message: "인증이 필요합니다" });
+        return;
+      }
       socket.join(`user:${userId}`);
       console.log(`[Realtime] User ${userId} authenticated on socket ${socket.id}`);
       socket.emit("auth:ok", { userId });

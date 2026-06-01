@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -10,6 +9,7 @@ import {
   LayoutDashboard, LineChart
 } from "lucide-react";
 
+import LoginGate from "@/components/LoginGate";
 import WatchlistPanel from "@/components/WatchlistPanel";
 import TradingChart from "@/components/TradingChart";
 import OrderPanel from "@/components/OrderPanel";
@@ -91,27 +91,7 @@ export default function Dashboard() {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div className="h-screen flex flex-col items-center justify-center bg-background gap-6">
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <BarChart2 size={32} className="text-primary" />
-            <h1 className="text-2xl font-bold">KIS Auto Trader</h1>
-          </div>
-          <p className="text-muted-foreground text-sm">한국투자증권 Open API 자동매매 시스템</p>
-        </div>
-        <a
-          href={getLoginUrl()}
-          className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          로그인하여 시작하기
-        </a>
-        <div className="text-xs text-muted-foreground text-center max-w-sm">
-          <p>논문 검증 단기·스윙 전략 7종 내장</p>
-          <p>전문가 수준 캔들차트 · 백테스트 · 텔레그램 알림 · 보안 강화</p>
-        </div>
-      </div>
-    );
+    return <LoginGate />;
   }
 
   // ─── 우측 탭 정의 ─────────────────────────────────────────────────────────

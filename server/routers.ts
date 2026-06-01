@@ -1,5 +1,5 @@
 import { eq, and, desc, gte } from "drizzle-orm";
-import { COOKIE_NAME } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
@@ -18,6 +18,10 @@ import { initKisClientForUser } from "./autoTrader";
 import { fetchStockNewsAndDisclosures } from "./news";
 import { runGridSearch, STRATEGY_PARAM_SPACES } from "./optimizer";
 import { createHeartbeatJob, deleteHeartbeatJob } from "./_core/heartbeat";
+import { AUTO_TRADE_MARKET_CRON_UTC } from "./autoTradeSchedule";
+import { calculateDailyRealizedPnl } from "./performance";
+import { evaluatePasswordLogin, loadPasswordAuthState, savePasswordAuthState } from "./_core/appPasswordAuth";
+import { sdk } from "./_core/sdk";
 import { parse as parseCookie } from "cookie";
 import { z } from "zod";
 
@@ -489,7 +493,7 @@ const autoTraderRouter = router({
         const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
         const job = await createHeartbeatJob({
           name: `auto-trade-${ctx.user.id}`,
-          cron: "0 */5 9-15 * * 1-5", // every 5 min, Mon-Fri, 09-15 KST
+          cron: AUTO_TRADE_MARKET_CRON_UTC, // every 5 min during KST market hours, expressed in UTC
           path: "/api/scheduled/auto-trade",
           description: `Auto trading cycle for user ${ctx.user.id}`,
         }, sessionToken);
@@ -779,18 +783,9 @@ const performanceRouter = router({
     if (!db) return [];
     const since = new Date(Date.now() - input.days * 86400_000);
     const allOrders = await db.select().from(orders)
-      .where(and(eq(orders.userId, ctx.user.id), eq(orders.orderType, "sell"), gte(orders.orderedAt, since)))
+      .where(and(eq(orders.userId, ctx.user.id), gte(orders.orderedAt, since)))
       .orderBy(orders.orderedAt);
-    // 날짜별 실현 손익 집계 (매도주문 기준)
-    const dailyMap = new Map<string, number>();
-    for (const o of allOrders) {
-      if (o.status === "cancelled" || o.status === "rejected") continue;
-      const date = o.orderedAt.toISOString().slice(0, 10);
-      const ep = Number(o.executedPrice || o.price || 0);
-      const eq2 = o.executedQty || o.quantity;
-      dailyMap.set(date, (dailyMap.get(date) || 0) + ep * eq2);
-    }
-    return Array.from(dailyMap.entries()).map(([date, amount]) => ({ date, amount })).sort((a, b) => a.date.localeCompare(b.date));
+    return calculateDailyRealizedPnl(allOrders);
   }),
 
   // 종목별 성과
@@ -888,6 +883,43 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
+    passwordStatus: publicProcedure.query(async () => {
+      const state = await loadPasswordAuthState();
+      return {
+        configured: Boolean(state.passwordHash),
+        mustChangePassword: state.mustChangePassword,
+      } as const;
+    }),
+    login: publicProcedure
+      .input(z.object({
+        password: z.string().min(1),
+        newPassword: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const state = await loadPasswordAuthState();
+        const result = await evaluatePasswordLogin({
+          password: input.password,
+          newPassword: input.newPassword,
+          passwordHash: state.passwordHash,
+          mustChangePassword: state.mustChangePassword,
+        });
+
+        if (!result.ok) {
+          return { success: false, reason: result.reason } as const;
+        }
+
+        if (result.passwordHash !== state.passwordHash || result.mustChangePassword !== state.mustChangePassword) {
+          await savePasswordAuthState({
+            passwordHash: result.passwordHash,
+            mustChangePassword: result.mustChangePassword,
+          });
+        }
+
+        const sessionToken = await sdk.createLocalAppSessionToken({ expiresInMs: ONE_YEAR_MS });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+        return { success: true, mustChangePassword: result.mustChangePassword } as const;
+      }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

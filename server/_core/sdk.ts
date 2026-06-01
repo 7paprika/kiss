@@ -82,6 +82,18 @@ const createOAuthHttpClient = (): AxiosInstance =>
     timeout: AXIOS_TIMEOUT_MS,
   });
 
+export function assertSingleUserAccess(user: { openId: string }): void {
+  if (!ENV.ownerOpenId) {
+    if (ENV.isProduction) {
+      throw ForbiddenError("OWNER_OPEN_ID is required in production");
+    }
+    return;
+  }
+  if (user.openId !== ENV.ownerOpenId) {
+    throw ForbiddenError("Owner access required");
+  }
+}
+
 class SDKServer {
   private readonly client: AxiosInstance;
   private readonly oauthService: OAuthService;
@@ -173,6 +185,17 @@ class SDKServer {
         openId,
         appId: ENV.appId,
         name: options.name || "",
+      },
+      options
+    );
+  }
+
+  async createLocalAppSessionToken(options: { expiresInMs?: number } = {}): Promise<string> {
+    return this.signSession(
+      {
+        openId: ENV.localOwnerOpenId,
+        appId: ENV.appId,
+        name: "KIS Owner",
       },
       options
     );
@@ -277,6 +300,19 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
+
+    if (sessionUserId === ENV.localOwnerOpenId && session.appId === ENV.appId) {
+      await db.upsertUser({
+        openId: ENV.localOwnerOpenId,
+        name: "KIS Owner",
+        loginMethod: "app-password",
+        role: "admin",
+        lastSignedIn: signedInAt,
+      });
+      const localUser = await db.getUserByOpenId(ENV.localOwnerOpenId);
+      return localUser ?? buildLocalOwnerUser(signedInAt);
+    }
+
     let user = await db.getUserByOpenId(sessionUserId);
 
     // If user not in DB, sync from OAuth server automatically
@@ -300,6 +336,8 @@ class SDKServer {
     if (!user) {
       throw ForbiddenError("User not found");
     }
+
+    assertSingleUserAccess(user);
 
     await db.upsertUser({
       openId: user.openId,
@@ -334,6 +372,20 @@ function buildCronUser(
     lastSignedIn: now,
     taskUid: userInfo.taskUid ?? undefined,
     isCron: true,
+  } as AuthenticatedUser;
+}
+
+function buildLocalOwnerUser(now = new Date()): AuthenticatedUser {
+  return {
+    id: 1,
+    openId: ENV.localOwnerOpenId,
+    name: "KIS Owner",
+    email: null,
+    loginMethod: "app-password",
+    role: "admin",
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
   } as AuthenticatedUser;
 }
 
