@@ -136,6 +136,25 @@ The envs above are system envs, when use env in website code, refer `server/_cor
 
 ---
 
+## Auto-Trading Capital Management
+
+The one-page strategy panel includes a compact capital-management block beside the existing strategy/stop controls.
+
+- Keep the default order cap (`maxOrderAmount`) as a hard ceiling for every buy.
+- Add a portfolio exposure cap (`maxPortfolioExposurePct`) so total evaluated holdings cannot exceed a chosen account percentage before opening new positions.
+- Add an entry allocation ratio (`entryCashPct`) so each new entry is capped at a fixed percentage of current account evaluation, not only a fixed KRW amount.
+- Add fixed-fractional risk sizing (`riskPerTradePct`): when a stop-loss percentage is configured, the buy budget is additionally capped by `accountEval * riskPerTradePct / stopLossPct`. This is a conservative, commonly used risk-per-trade model; ATR is noted as a future volatility-adjusted stop option, while Kelly-style sizing is intentionally not the default because it is aggressive and highly input-sensitive.
+- Preserve stop-loss / take-profit liquidation checks before new entries.
+- UI copy must disclose that these are guardrails and not a guarantee of execution price or loss limit.
+
+Default guardrails:
+- `entryCashPct`: 10% per entry
+- `riskPerTradePct`: 1% account risk per trade
+- `maxPortfolioExposurePct`: 50% total equity exposure
+- `stopLossPct`: 3%, `takeProfitPct`: 5% remain editable
+
+---
+
 ## Frontend Workflow
 
 1. Choose a design style before you write any frontend code according to Design Guide (color, font, shadow, art style). Remember to edit `client/src/index.css` for global theming and add needed font using google font cdn in `client/index.html`.

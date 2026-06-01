@@ -85,6 +85,9 @@ export const autoTraderConfig = mysqlTable("auto_trader_config", {
   tradingStrategyId: int("tradingStrategyId"),     // FK -> strategyConfigs
   maxPositions: int("maxPositions").default(5),    // 최대 보유 종목 수
   maxOrderAmount: decimal("maxOrderAmount", { precision: 15, scale: 2 }).default("1000000"), // 종목당 최대 주문금액
+  entryCashPct: decimal("entryCashPct", { precision: 5, scale: 2 }).default("10.00"), // 1회 진입 평가금 비중 %
+  riskPerTradePct: decimal("riskPerTradePct", { precision: 5, scale: 2 }).default("1.00"), // 거래당 계좌 위험 %
+  maxPortfolioExposurePct: decimal("maxPortfolioExposurePct", { precision: 5, scale: 2 }).default("50.00"), // 총 주식 노출 한도 %
   stopLossPct: decimal("stopLossPct", { precision: 5, scale: 2 }).default("3.00"),   // 손절 %
   takeProfitPct: decimal("takeProfitPct", { precision: 5, scale: 2 }).default("5.00"), // 익절 %
   scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }), // Heartbeat task UID

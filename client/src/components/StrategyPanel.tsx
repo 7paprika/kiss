@@ -87,6 +87,35 @@ export default function StrategyPanel() {
   const enabledSelectionConfigs = userConfigs.filter((c) => c.strategyType === "selection" && c.isEnabled);
   const enabledTradingConfigs = userConfigs.filter((c) => c.strategyType === "trading" && c.isEnabled);
 
+  const buildAutoConfigPayload = (overrides: Partial<{
+    selectionStrategyId: number | null;
+    tradingStrategyId: number | null;
+    maxPositions: number;
+    maxOrderAmount: number;
+    entryCashPct: number;
+    riskPerTradePct: number;
+    maxPortfolioExposurePct: number;
+    stopLossPct: number;
+    takeProfitPct: number;
+    accountProfileId: number | null;
+  }> = {}) => ({
+    selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
+    tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
+    maxPositions: autoConfig?.maxPositions || 5,
+    maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
+    entryCashPct: Number(autoConfig?.entryCashPct) || 10,
+    riskPerTradePct: Number(autoConfig?.riskPerTradePct) || 1,
+    maxPortfolioExposurePct: Number(autoConfig?.maxPortfolioExposurePct) || 50,
+    stopLossPct: Number(autoConfig?.stopLossPct) || 3,
+    takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
+    accountProfileId: autoConfig?.accountProfileId ?? null,
+    ...overrides,
+  });
+
+  const saveAutoConfig = (overrides: Parameters<typeof buildAutoConfigPayload>[0]) => {
+    saveAutoMutation.mutate(buildAutoConfigPayload(overrides));
+  };
+
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Auto Trading Control */}
@@ -124,13 +153,7 @@ export default function StrategyPanel() {
             </div>
             <select
               value={autoConfig?.accountProfileId || ""}
-              onChange={(e) => saveAutoMutation.mutate({
-                selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
-                tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
-                maxPositions: autoConfig?.maxPositions || 5,
-                maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
-                stopLossPct: Number(autoConfig?.stopLossPct) || 3,
-                takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
+              onChange={(e) => saveAutoConfig({
                 accountProfileId: e.target.value ? parseInt(e.target.value) : null,
               })}
               className="w-full text-xs bg-secondary border border-border rounded px-2 py-1 text-foreground"
@@ -160,13 +183,8 @@ export default function StrategyPanel() {
             <label className="text-[10px] text-muted-foreground">종목 선정 전략</label>
             <select
               value={autoConfig?.selectionStrategyId || ""}
-              onChange={(e) => saveAutoMutation.mutate({
+              onChange={(e) => saveAutoConfig({
                 selectionStrategyId: e.target.value ? parseInt(e.target.value) : null,
-                tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
-                maxPositions: autoConfig?.maxPositions || 5,
-                maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
-                stopLossPct: Number(autoConfig?.stopLossPct) || 3,
-                takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
               })}
               className="w-full text-xs mt-0.5 bg-secondary border border-border rounded px-2 py-1 text-foreground"
             >
@@ -180,13 +198,8 @@ export default function StrategyPanel() {
             <label className="text-[10px] text-muted-foreground">매매 실행 전략</label>
             <select
               value={autoConfig?.tradingStrategyId || ""}
-              onChange={(e) => saveAutoMutation.mutate({
-                selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
+              onChange={(e) => saveAutoConfig({
                 tradingStrategyId: e.target.value ? parseInt(e.target.value) : null,
-                maxPositions: autoConfig?.maxPositions || 5,
-                maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
-                stopLossPct: Number(autoConfig?.stopLossPct) || 3,
-                takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
               })}
               className="w-full text-xs mt-0.5 bg-secondary border border-border rounded px-2 py-1 text-foreground"
             >
@@ -207,13 +220,8 @@ export default function StrategyPanel() {
                 type="number"
                 defaultValue={autoConfig?.maxPositions || 5}
                 min={1} max={20}
-                onBlur={(e) => saveAutoMutation.mutate({
-                  selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
-                  tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
+                onBlur={(e) => saveAutoConfig({
                   maxPositions: parseInt(e.target.value) || 5,
-                  maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
-                  stopLossPct: Number(autoConfig?.stopLossPct) || 3,
-                  takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
                 })}
                 className="w-full text-xs mt-0.5"
               />
@@ -224,13 +232,8 @@ export default function StrategyPanel() {
                 type="number"
                 defaultValue={Number(autoConfig?.maxOrderAmount) || 1_000_000}
                 step={100000}
-                onBlur={(e) => saveAutoMutation.mutate({
-                  selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
-                  tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
-                  maxPositions: autoConfig?.maxPositions || 5,
+                onBlur={(e) => saveAutoConfig({
                   maxOrderAmount: parseInt(e.target.value) || 1_000_000,
-                  stopLossPct: Number(autoConfig?.stopLossPct) || 3,
-                  takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
                 })}
                 className="w-full text-xs mt-0.5"
               />
@@ -243,13 +246,8 @@ export default function StrategyPanel() {
                 type="number"
                 defaultValue={Number(autoConfig?.stopLossPct) || 3}
                 min={0} max={50} step={0.5}
-                onBlur={(e) => saveAutoMutation.mutate({
-                  selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
-                  tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
-                  maxPositions: autoConfig?.maxPositions || 5,
-                  maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
+                onBlur={(e) => saveAutoConfig({
                   stopLossPct: parseFloat(e.target.value) || 3,
-                  takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
                 })}
                 className="w-full text-xs mt-0.5"
               />
@@ -260,17 +258,63 @@ export default function StrategyPanel() {
                 type="number"
                 defaultValue={Number(autoConfig?.takeProfitPct) || 5}
                 min={0} max={100} step={0.5}
-                onBlur={(e) => saveAutoMutation.mutate({
-                  selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
-                  tradingStrategyId: autoConfig?.tradingStrategyId ?? null,
-                  maxPositions: autoConfig?.maxPositions || 5,
-                  maxOrderAmount: Number(autoConfig?.maxOrderAmount) || 1_000_000,
-                  stopLossPct: Number(autoConfig?.stopLossPct) || 3,
+                onBlur={(e) => saveAutoConfig({
                   takeProfitPct: parseFloat(e.target.value) || 5,
                 })}
                 className="w-full text-xs mt-0.5"
               />
             </div>
+          </div>
+
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary">
+                <ShieldAlert size={11} />
+                자금관리 가드레일
+              </div>
+              <span className="text-[9px] text-muted-foreground">Fixed fractional</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div>
+                <label className="text-[9px] text-muted-foreground">진입 비중</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.entryCashPct) || 10}
+                  min={1} max={100} step={1}
+                  onBlur={(e) => saveAutoConfig({
+                    entryCashPct: parseFloat(e.target.value) || 10,
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">거래당 위험</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.riskPerTradePct) || 1}
+                  min={0} max={10} step={0.25}
+                  onBlur={(e) => saveAutoConfig({
+                    riskPerTradePct: parseFloat(e.target.value) || 1,
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">총 노출 한도</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.maxPortfolioExposurePct) || 50}
+                  min={1} max={100} step={1}
+                  onBlur={(e) => saveAutoConfig({
+                    maxPortfolioExposurePct: parseFloat(e.target.value) || 50,
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+            </div>
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              신규 진입금액은 주문금액, 평가금 대비 진입 비중, 손절폭 기준 거래당 위험, 총 노출 한도 중 가장 작은 값으로 제한합니다. 시장가 체결·갭 하락 손실을 보장하지는 않습니다.
+            </p>
           </div>
         </div>
 

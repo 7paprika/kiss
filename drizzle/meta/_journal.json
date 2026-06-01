@@ -43,6 +43,13 @@
       "when": 1780200076343,
       "tag": "0005_slim_slapstick",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1780304729475,
+      "tag": "0006_serious_salo",
+      "breakpoints": true
     }
   ]
 }

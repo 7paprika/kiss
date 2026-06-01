@@ -101,6 +101,72 @@ export async function initKisClientForUser(userId: number, accountProfileId?: nu
   return client;
 }
 
+// ─── Capital / Risk Management ───────────────────────────────────────────────
+
+export function calculateRiskManagedOrderQuantity(params: {
+  currentPrice: number;
+  accountEval: number;
+  currentExposure: number;
+  maxOrderAmount: number;
+  entryCashPct: number;
+  riskPerTradePct: number;
+  stopLossPct: number;
+  maxPortfolioExposurePct: number;
+}): {
+  quantity: number;
+  orderBudget: number;
+  reason?: string;
+  limits: {
+    maxOrderAmount: number;
+    entryAllocationAmount: number;
+    riskBudgetAmount: number;
+    remainingExposureAmount: number;
+  };
+} {
+  const currentPrice = Math.max(0, params.currentPrice);
+  const accountEval = Math.max(0, params.accountEval);
+  const currentExposure = Math.max(0, params.currentExposure);
+  const maxOrderAmount = Math.max(0, params.maxOrderAmount);
+  const entryCashPct = Math.min(Math.max(params.entryCashPct || 10, 1), 100);
+  const riskPerTradePct = Math.min(Math.max(params.riskPerTradePct || 0, 0), 10);
+  const stopLossPct = Math.min(Math.max(params.stopLossPct || 0, 0), 50);
+  const maxPortfolioExposurePct = Math.min(Math.max(params.maxPortfolioExposurePct || 50, 1), 100);
+
+  const entryAllocationAmount = accountEval > 0 ? accountEval * entryCashPct / 100 : maxOrderAmount;
+  const riskBudgetAmount = accountEval > 0 && riskPerTradePct > 0 && stopLossPct > 0
+    ? accountEval * riskPerTradePct / stopLossPct
+    : Number.POSITIVE_INFINITY;
+  const maxExposureAmount = accountEval > 0 ? accountEval * maxPortfolioExposurePct / 100 : Number.POSITIVE_INFINITY;
+  const remainingExposureAmount = Math.max(0, maxExposureAmount - currentExposure);
+
+  const finiteRiskBudget = Number.isFinite(riskBudgetAmount) ? riskBudgetAmount : maxOrderAmount;
+  const orderBudget = Math.max(0, Math.min(maxOrderAmount, entryAllocationAmount, riskBudgetAmount, remainingExposureAmount));
+
+  if (currentPrice <= 0) {
+    return {
+      quantity: 0,
+      orderBudget: 0,
+      reason: "현재가가 유효하지 않습니다",
+      limits: { maxOrderAmount, entryAllocationAmount, riskBudgetAmount: finiteRiskBudget, remainingExposureAmount },
+    };
+  }
+
+  if (remainingExposureAmount <= 0) {
+    return {
+      quantity: 0,
+      orderBudget: 0,
+      reason: "포트폴리오 노출 한도에 도달했습니다",
+      limits: { maxOrderAmount, entryAllocationAmount, riskBudgetAmount: finiteRiskBudget, remainingExposureAmount },
+    };
+  }
+
+  return {
+    quantity: Math.floor(orderBudget / currentPrice),
+    orderBudget,
+    limits: { maxOrderAmount, entryAllocationAmount, riskBudgetAmount: finiteRiskBudget, remainingExposureAmount },
+  };
+}
+
 // ─── Auto Trading Cycle ───────────────────────────────────────────────────────
 
 export async function runAutoTradingCycle(userId: number): Promise<void> {
@@ -146,10 +212,16 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
   // ─── Phase 0: Stop-loss / Take-profit check on ALL holdings ─────────────────
   const stopLossPct = Number(config.stopLossPct) || 0;
   const takeProfitPct = Number(config.takeProfitPct) || 0;
+  let latestBalance: Awaited<ReturnType<KisApiClient["getBalance"]>> | null = null;
+
+  const getLatestBalance = async () => {
+    if (!latestBalance) latestBalance = await client.getBalance();
+    return latestBalance;
+  };
 
   if (stopLossPct > 0 || takeProfitPct > 0) {
     try {
-      const balance = await client.getBalance();
+      const balance = await getLatestBalance();
       for (const holding of balance.holdings) {
         if (holding.holdQty <= 0) continue;
 
@@ -250,6 +322,9 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
   const tradingParams = (tradingConfig.params as Record<string, number | string | boolean>) || tradingStrategy.meta.defaultParams;
   const maxPositions = config.maxPositions || 5;
   const maxOrderAmount = Number(config.maxOrderAmount) || 1_000_000;
+  const entryCashPct = Number(config.entryCashPct) || 10;
+  const riskPerTradePct = Number(config.riskPerTradePct) || 1;
+  const maxPortfolioExposurePct = Number(config.maxPortfolioExposurePct) || 50;
   const today = new Date().toISOString().slice(0, 10);
 
   for (const result of selected.slice(0, maxPositions)) {
@@ -298,8 +373,30 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
     if (signal.signal === "BUY" && signal.strength >= 0.6) {
       try {
         const currentPrice = candidate.ohlcv[candidate.ohlcv.length - 1].close;
-        const quantity = Math.floor(maxOrderAmount / currentPrice);
-        if (quantity < 1) continue;
+        const balance = await getLatestBalance();
+        const currentExposure = balance.holdings.reduce((sum, holding) => sum + Math.max(0, holding.evalAmount || 0), 0);
+        const positionSize = calculateRiskManagedOrderQuantity({
+          currentPrice,
+          accountEval: balance.totalEval,
+          currentExposure,
+          maxOrderAmount,
+          entryCashPct,
+          riskPerTradePct,
+          stopLossPct,
+          maxPortfolioExposurePct,
+        });
+        const quantity = positionSize.quantity;
+        if (quantity < 1) {
+          await log(
+            userId,
+            "warn",
+            `${result.stockCode} 매수 보류: ${positionSize.reason || "자금관리 한도 내 주문 가능 수량 없음"}`,
+            result.stockCode,
+            tradingConfig.strategyId,
+            positionSize
+          );
+          continue;
+        }
 
         const orderResult = await client.placeOrder(result.stockCode, "buy", quantity, currentPrice, "market");
 
