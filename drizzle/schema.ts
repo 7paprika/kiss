@@ -9,6 +9,7 @@ import {
   json,
   decimal,
   bigint,
+  index,
 } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
@@ -90,6 +91,11 @@ export const autoTraderConfig = mysqlTable("auto_trader_config", {
   maxPortfolioExposurePct: decimal("maxPortfolioExposurePct", { precision: 5, scale: 2 }).default("50.00"), // 총 주식 노출 한도 %
   stopLossPct: decimal("stopLossPct", { precision: 5, scale: 2 }).default("3.00"),   // 손절 %
   takeProfitPct: decimal("takeProfitPct", { precision: 5, scale: 2 }).default("5.00"), // 익절 %
+  trailingStopPct: decimal("trailingStopPct", { precision: 5, scale: 2 }).default("0.00"), // 최고가 대비 되돌림 청산 %
+  partialTakeProfitPct: decimal("partialTakeProfitPct", { precision: 5, scale: 2 }).default("0.00"), // 부분익절 발동 수익률 %
+  partialTakeProfitSellPct: decimal("partialTakeProfitSellPct", { precision: 5, scale: 2 }).default("50.00"), // 부분익절 매도 비중 %
+  breakEvenTriggerPct: decimal("breakEvenTriggerPct", { precision: 5, scale: 2 }).default("0.00"), // 본전 스탑 활성화 수익률 %
+  breakEvenBufferPct: decimal("breakEvenBufferPct", { precision: 5, scale: 2 }).default("0.00"), // 본전 스탑 방어 여유 %
   scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }), // Heartbeat task UID
   accountProfileId: int("accountProfileId"), // FK -> kisSettings.id (전략별 계좌 배정)
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -120,6 +126,23 @@ export const orders = mysqlTable("orders", {
 });
 
 export type Order = typeof orders.$inferSelect;
+
+// 보유종목별 자동 청산 상태 (트레일링 고점, 부분익절 1회 실행 여부)
+export const autoPositionStates = mysqlTable("auto_position_states", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  accountProfileId: int("accountProfileId"),
+  highPrice: decimal("highPrice", { precision: 15, scale: 2 }).default("0.00"),
+  avgPrice: decimal("avgPrice", { precision: 15, scale: 2 }).default("0.00"),
+  partialTakeProfitExecuted: boolean("partialTakeProfitExecuted").default(false).notNull(),
+  lastQty: int("lastQty").default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [
+  index("auto_position_state_lookup").on(table.userId, table.stockCode, table.accountProfileId),
+]);
+
+export type AutoPositionState = typeof autoPositionStates.$inferSelect;
 
 // 자동매매 로그
 export const autoTraderLogs = mysqlTable("auto_trader_logs", {

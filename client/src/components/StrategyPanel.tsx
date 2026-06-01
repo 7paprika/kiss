@@ -97,6 +97,11 @@ export default function StrategyPanel() {
     maxPortfolioExposurePct: number;
     stopLossPct: number;
     takeProfitPct: number;
+    trailingStopPct: number;
+    partialTakeProfitPct: number;
+    partialTakeProfitSellPct: number;
+    breakEvenTriggerPct: number;
+    breakEvenBufferPct: number;
     accountProfileId: number | null;
   }> = {}) => ({
     selectionStrategyId: autoConfig?.selectionStrategyId ?? null,
@@ -108,6 +113,11 @@ export default function StrategyPanel() {
     maxPortfolioExposurePct: Number(autoConfig?.maxPortfolioExposurePct) || 50,
     stopLossPct: Number(autoConfig?.stopLossPct) || 3,
     takeProfitPct: Number(autoConfig?.takeProfitPct) || 5,
+    trailingStopPct: Number(autoConfig?.trailingStopPct) || 0,
+    partialTakeProfitPct: Number(autoConfig?.partialTakeProfitPct) || 0,
+    partialTakeProfitSellPct: Number(autoConfig?.partialTakeProfitSellPct) || 50,
+    breakEvenTriggerPct: Number(autoConfig?.breakEvenTriggerPct) || 0,
+    breakEvenBufferPct: Number(autoConfig?.breakEvenBufferPct) || 0,
     accountProfileId: autoConfig?.accountProfileId ?? null,
     ...overrides,
   });
@@ -247,7 +257,7 @@ export default function StrategyPanel() {
                 defaultValue={Number(autoConfig?.stopLossPct) || 3}
                 min={0} max={50} step={0.5}
                 onBlur={(e) => saveAutoConfig({
-                  stopLossPct: parseFloat(e.target.value) || 3,
+                  stopLossPct: Math.max(0, parseFloat(e.target.value) || 0),
                 })}
                 className="w-full text-xs mt-0.5"
               />
@@ -259,11 +269,86 @@ export default function StrategyPanel() {
                 defaultValue={Number(autoConfig?.takeProfitPct) || 5}
                 min={0} max={100} step={0.5}
                 onBlur={(e) => saveAutoConfig({
-                  takeProfitPct: parseFloat(e.target.value) || 5,
+                  takeProfitPct: Math.max(0, parseFloat(e.target.value) || 0),
                 })}
                 className="w-full text-xs mt-0.5"
               />
             </div>
+          </div>
+
+          <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 p-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-amber-300">
+                <TrendingDown size={11} />
+                트레일링·부분청산
+              </div>
+              <span className="text-[9px] text-muted-foreground">Exit guard</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div>
+                <label className="text-[9px] text-muted-foreground">트레일링</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.trailingStopPct) || 0}
+                  min={0} max={50} step={0.5}
+                  onBlur={(e) => saveAutoConfig({
+                    trailingStopPct: Math.max(0, parseFloat(e.target.value) || 0),
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">부분익절</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.partialTakeProfitPct) || 0}
+                  min={0} max={100} step={0.5}
+                  onBlur={(e) => saveAutoConfig({
+                    partialTakeProfitPct: Math.max(0, parseFloat(e.target.value) || 0),
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">매도비중</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.partialTakeProfitSellPct) || 50}
+                  min={1} max={100} step={5}
+                  onBlur={(e) => saveAutoConfig({
+                    partialTakeProfitSellPct: Math.min(100, Math.max(1, parseFloat(e.target.value) || 50)),
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">본전발동</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.breakEvenTriggerPct) || 0}
+                  min={0} max={100} step={0.5}
+                  onBlur={(e) => saveAutoConfig({
+                    breakEvenTriggerPct: Math.max(0, parseFloat(e.target.value) || 0),
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">본전버퍼</label>
+                <input
+                  type="number"
+                  defaultValue={Number(autoConfig?.breakEvenBufferPct) || 0}
+                  min={0} max={20} step={0.25}
+                  onBlur={(e) => saveAutoConfig({
+                    breakEvenBufferPct: Math.max(0, parseFloat(e.target.value) || 0),
+                  })}
+                  className="w-full text-xs mt-0.5"
+                />
+              </div>
+            </div>
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              트레일링은 보유 중 최고가 대비 하락률로 전량 청산합니다. 부분익절은 종목별 1회만 설정 비중만큼 매도하고, 본전 스탑은 지정 수익률 도달 후 평단가+버퍼까지 되밀리면 방어 청산합니다.
+            </p>
           </div>
 
           <div className="rounded-lg border border-primary/20 bg-primary/5 p-2 space-y-2">
@@ -319,13 +404,13 @@ export default function StrategyPanel() {
         </div>
 
         {/* Stop-loss / Take-profit Status */}
-        {(Number(autoConfig?.stopLossPct) > 0 || Number(autoConfig?.takeProfitPct) > 0) && (
+        {(Number(autoConfig?.stopLossPct) > 0 || Number(autoConfig?.takeProfitPct) > 0 || Number(autoConfig?.trailingStopPct) > 0 || Number(autoConfig?.partialTakeProfitPct) > 0 || Number(autoConfig?.breakEvenTriggerPct) > 0) && (
           <div className="mt-2 p-2 rounded bg-secondary/40 border border-border/50">
             <div className="flex items-center gap-1.5 mb-1.5">
               <ShieldAlert size={11} className="text-yellow-400" />
               <span className="text-[10px] font-semibold text-yellow-400">자동 청산 활성</span>
             </div>
-            <div className="flex gap-3 text-[10px]">
+            <div className="flex flex-wrap gap-3 text-[10px]">
               {Number(autoConfig?.stopLossPct) > 0 && (
                 <div className="flex items-center gap-1">
                   <TrendingDown size={10} className="text-bear" />
@@ -340,9 +425,30 @@ export default function StrategyPanel() {
                   <span className="text-bull font-mono font-bold">+{autoConfig?.takeProfitPct}%</span>
                 </div>
               )}
+              {Number(autoConfig?.trailingStopPct) > 0 && (
+                <div className="flex items-center gap-1">
+                  <TrendingDown size={10} className="text-amber-300" />
+                  <span className="text-muted-foreground">트레일링:</span>
+                  <span className="text-amber-300 font-mono font-bold">-{autoConfig?.trailingStopPct}%</span>
+                </div>
+              )}
+              {Number(autoConfig?.partialTakeProfitPct) > 0 && (
+                <div className="flex items-center gap-1">
+                  <TrendingUp size={10} className="text-bull" />
+                  <span className="text-muted-foreground">부분익절:</span>
+                  <span className="text-bull font-mono font-bold">+{autoConfig?.partialTakeProfitPct}%/{autoConfig?.partialTakeProfitSellPct}%</span>
+                </div>
+              )}
+              {Number(autoConfig?.breakEvenTriggerPct) > 0 && (
+                <div className="flex items-center gap-1">
+                  <ShieldAlert size={10} className="text-primary" />
+                  <span className="text-muted-foreground">본전스탑:</span>
+                  <span className="text-primary font-mono font-bold">+{autoConfig?.breakEvenTriggerPct}% 후 +{autoConfig?.breakEvenBufferPct}%</span>
+                </div>
+              )}
             </div>
             <p className="text-[9px] text-muted-foreground mt-1">
-              자동매매 사이클마다 보유 종목 전체를 스캔하여 기준 초과 시 시장가 청산합니다.
+              자동매매 사이클마다 보유 종목 전체를 스캔하여 손절·익절·트레일링·부분익절·본전 스탑 조건을 시장가 청산으로 실행합니다.
             </p>
           </div>
         )}

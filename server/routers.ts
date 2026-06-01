@@ -483,6 +483,11 @@ const autoTraderRouter = router({
     maxPortfolioExposurePct: z.number().min(1).max(100).default(50),
     stopLossPct: z.number().min(0).max(50).default(3),
     takeProfitPct: z.number().min(0).max(100).default(5),
+    trailingStopPct: z.number().min(0).max(50).default(0),
+    partialTakeProfitPct: z.number().min(0).max(100).default(0),
+    partialTakeProfitSellPct: z.number().min(1).max(100).default(50),
+    breakEvenTriggerPct: z.number().min(0).max(100).default(0),
+    breakEvenBufferPct: z.number().min(0).max(20).default(0),
     accountProfileId: z.number().nullable().optional(), // 전략별 계좌 배정
   })).mutation(async ({ ctx, input }) => {
     const db = await getDb();
@@ -498,6 +503,11 @@ const autoTraderRouter = router({
       maxPortfolioExposurePct: String(input.maxPortfolioExposurePct),
       stopLossPct: String(input.stopLossPct),
       takeProfitPct: String(input.takeProfitPct),
+      trailingStopPct: String(input.trailingStopPct),
+      partialTakeProfitPct: String(input.partialTakeProfitPct),
+      partialTakeProfitSellPct: String(input.partialTakeProfitSellPct),
+      breakEvenTriggerPct: String(input.breakEvenTriggerPct),
+      breakEvenBufferPct: String(input.breakEvenBufferPct),
       accountProfileId: input.accountProfileId ?? null,
     };
     if (existing.length) {

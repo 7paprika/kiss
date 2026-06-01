@@ -11,8 +11,9 @@ import {
   strategyConfigs,
   watchlist,
   orders,
+  autoPositionStates,
 } from "../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { KisApiClient, getKisClient } from "./kisApi";
 import { decrypt } from "./crypto";
 import { getSelectionStrategy, getTradingStrategy } from "./strategies/index";
@@ -167,6 +168,126 @@ export function calculateRiskManagedOrderQuantity(params: {
   };
 }
 
+export type ExitActionKind = "stop_loss" | "take_profit" | "trailing_stop" | "partial_take_profit" | "break_even_stop";
+
+export function evaluatePositionExit(params: {
+  stockCode: string;
+  holdQty: number;
+  avgPrice: number;
+  currentPrice: number;
+  previousHighPrice?: number | null;
+  stopLossPct: number;
+  takeProfitPct: number;
+  trailingStopPct: number;
+  partialTakeProfitPct: number;
+  partialTakeProfitSellPct: number;
+  breakEvenTriggerPct: number;
+  breakEvenBufferPct: number;
+  partialTakeProfitExecuted: boolean;
+}): {
+  updatedHighPrice: number;
+  pnlPct: number;
+  action: {
+    kind: ExitActionKind;
+    quantity: number;
+    reason: string;
+    strategyId: string;
+  } | null;
+} {
+  const holdQty = Math.max(0, Math.floor(params.holdQty));
+  const avgPrice = Math.max(0, params.avgPrice);
+  const currentPrice = Math.max(0, params.currentPrice);
+  const previousHighPrice = Math.max(0, params.previousHighPrice || 0);
+  const updatedHighPrice = Math.max(previousHighPrice, currentPrice);
+  const pnlPct = avgPrice > 0 ? (currentPrice - avgPrice) / avgPrice * 100 : 0;
+
+  if (holdQty <= 0 || avgPrice <= 0 || currentPrice <= 0) {
+    return { updatedHighPrice, pnlPct, action: null };
+  }
+
+  const stopLossPct = Math.max(0, params.stopLossPct || 0);
+  const takeProfitPct = Math.max(0, params.takeProfitPct || 0);
+  const trailingStopPct = Math.max(0, params.trailingStopPct || 0);
+  const partialTakeProfitPct = Math.max(0, params.partialTakeProfitPct || 0);
+  const partialTakeProfitSellPct = Math.min(Math.max(params.partialTakeProfitSellPct || 0, 0), 100);
+  const breakEvenTriggerPct = Math.max(0, params.breakEvenTriggerPct || 0);
+  const breakEvenBufferPct = Math.max(0, params.breakEvenBufferPct || 0);
+
+  if (stopLossPct > 0 && pnlPct <= -stopLossPct) {
+    return {
+      updatedHighPrice,
+      pnlPct,
+      action: {
+        kind: "stop_loss",
+        quantity: holdQty,
+        reason: `손절 청산 (수익률: ${pnlPct.toFixed(2)}%, 기준: -${stopLossPct}%)`,
+        strategyId: "stop_loss_take_profit",
+      },
+    };
+  }
+
+  if (takeProfitPct > 0 && pnlPct >= takeProfitPct) {
+    return {
+      updatedHighPrice,
+      pnlPct,
+      action: {
+        kind: "take_profit",
+        quantity: holdQty,
+        reason: `익절 청산 (수익률: +${pnlPct.toFixed(2)}%, 기준: +${takeProfitPct}%)`,
+        strategyId: "stop_loss_take_profit",
+      },
+    };
+  }
+
+  if (trailingStopPct > 0 && updatedHighPrice > avgPrice) {
+    const drawdownFromHighPct = (updatedHighPrice - currentPrice) / updatedHighPrice * 100;
+    if (drawdownFromHighPct >= trailingStopPct) {
+      return {
+        updatedHighPrice,
+        pnlPct,
+        action: {
+          kind: "trailing_stop",
+          quantity: holdQty,
+          reason: `트레일링 스탑 청산 (고점: ${updatedHighPrice.toLocaleString()}원, 현재가: ${currentPrice.toLocaleString()}원, 하락폭: -${drawdownFromHighPct.toFixed(2)}%, 기준: -${trailingStopPct}%)`,
+          strategyId: "trailing_stop",
+        },
+      };
+    }
+  }
+
+  if (breakEvenTriggerPct > 0 && updatedHighPrice >= avgPrice * (1 + breakEvenTriggerPct / 100)) {
+    const breakEvenStopPrice = avgPrice * (1 + breakEvenBufferPct / 100);
+    if (currentPrice <= breakEvenStopPrice) {
+      return {
+        updatedHighPrice,
+        pnlPct,
+        action: {
+          kind: "break_even_stop",
+          quantity: holdQty,
+          reason: `본전 스탑 청산 (최고 수익률: ${((updatedHighPrice - avgPrice) / avgPrice * 100).toFixed(2)}%, 방어가: ${breakEvenStopPrice.toFixed(0)}원)`,
+          strategyId: "break_even_stop",
+        },
+      };
+    }
+  }
+
+  if (!params.partialTakeProfitExecuted && partialTakeProfitPct > 0 && partialTakeProfitSellPct > 0 && pnlPct >= partialTakeProfitPct) {
+    const quantity = Math.max(1, Math.floor(holdQty * partialTakeProfitSellPct / 100));
+    return {
+      updatedHighPrice,
+      pnlPct,
+      action: {
+        kind: "partial_take_profit",
+        quantity: Math.min(holdQty, quantity),
+        reason: `부분익절 청산 (수익률: +${pnlPct.toFixed(2)}%, 기준: +${partialTakeProfitPct}%, 매도비중: ${partialTakeProfitSellPct}%)`,
+        strategyId: "partial_take_profit",
+      },
+    };
+  }
+
+  return { updatedHighPrice, pnlPct, action: null };
+}
+
 // ─── Auto Trading Cycle ───────────────────────────────────────────────────────
 
 export async function runAutoTradingCycle(userId: number): Promise<void> {
@@ -209,9 +330,14 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
     return;
   }
 
-  // ─── Phase 0: Stop-loss / Take-profit check on ALL holdings ─────────────────
+  // ─── Phase 0: Risk exits on ALL holdings ────────────────────────────────────
   const stopLossPct = Number(config.stopLossPct) || 0;
   const takeProfitPct = Number(config.takeProfitPct) || 0;
+  const trailingStopPct = Number(config.trailingStopPct) || 0;
+  const partialTakeProfitPct = Number(config.partialTakeProfitPct) || 0;
+  const partialTakeProfitSellPct = Number(config.partialTakeProfitSellPct) || 50;
+  const breakEvenTriggerPct = Number(config.breakEvenTriggerPct) || 0;
+  const breakEvenBufferPct = Number(config.breakEvenBufferPct) || 0;
   let latestBalance: Awaited<ReturnType<KisApiClient["getBalance"]>> | null = null;
 
   const getLatestBalance = async () => {
@@ -219,7 +345,10 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
     return latestBalance;
   };
 
-  if (stopLossPct > 0 || takeProfitPct > 0) {
+  const hasExitRules = stopLossPct > 0 || takeProfitPct > 0 || trailingStopPct > 0 ||
+    partialTakeProfitPct > 0 || breakEvenTriggerPct > 0;
+
+  if (hasExitRules) {
     try {
       const balance = await getLatestBalance();
       for (const holding of balance.holdings) {
@@ -229,66 +358,119 @@ export async function runAutoTradingCycle(userId: number): Promise<void> {
         const currentPrice = holding.currentPrice || 0;
         if (avgPrice <= 0 || currentPrice <= 0) continue;
 
-        const pnlPct = (currentPrice - avgPrice) / avgPrice * 100;
-        let exitReason = "";
+        const existingState = (await db.select().from(autoPositionStates).where(
+          and(
+            eq(autoPositionStates.userId, userId),
+            eq(autoPositionStates.stockCode, holding.stockCode),
+            config.accountProfileId == null
+              ? isNull(autoPositionStates.accountProfileId)
+              : eq(autoPositionStates.accountProfileId, config.accountProfileId)
+          )
+        ).limit(1))[0];
 
-        if (stopLossPct > 0 && pnlPct <= -stopLossPct) {
-          exitReason = `손절 청산 (수익률: ${pnlPct.toFixed(2)}%, 기준: -${stopLossPct}%)`;
-        } else if (takeProfitPct > 0 && pnlPct >= takeProfitPct) {
-          exitReason = `익절 청산 (수익률: +${pnlPct.toFixed(2)}%, 기준: +${takeProfitPct}%)`;
-        }
+        const storedAvgPrice = existingState?.avgPrice ? Number(existingState.avgPrice) : null;
+        const storedQty = Number(existingState?.lastQty || 0);
+        const shouldResetPositionState = Boolean(existingState) && (
+          holding.holdQty > storedQty ||
+          (storedAvgPrice !== null && avgPrice > 0 && Math.abs(storedAvgPrice - avgPrice) / avgPrice > 0.001 && holding.holdQty >= storedQty)
+        );
 
-        if (exitReason) {
-          await log(userId, "signal", `${holding.stockCode} ${exitReason}`, holding.stockCode);
+        const exitDecision = evaluatePositionExit({
+          stockCode: holding.stockCode,
+          holdQty: holding.holdQty,
+          avgPrice,
+          currentPrice,
+          previousHighPrice: shouldResetPositionState ? null : (existingState?.highPrice ? Number(existingState.highPrice) : null),
+          stopLossPct,
+          takeProfitPct,
+          trailingStopPct,
+          partialTakeProfitPct,
+          partialTakeProfitSellPct,
+          breakEvenTriggerPct,
+          breakEvenBufferPct,
+          partialTakeProfitExecuted: shouldResetPositionState ? false : Boolean(existingState?.partialTakeProfitExecuted),
+        });
 
-          const orderResult = await client.placeOrder(
-            holding.stockCode, "sell", holding.holdQty, currentPrice, "market"
-          );
-
-          const watchlistItem = (await db.select().from(watchlist)
-            .where(and(eq(watchlist.userId, userId), eq(watchlist.stockCode, holding.stockCode)))
-            .limit(1))[0];
-
-          await db.insert(orders).values({
+        const stateData = {
+          highPrice: String(exitDecision.updatedHighPrice),
+          avgPrice: String(avgPrice),
+          partialTakeProfitExecuted: shouldResetPositionState ? false : Boolean(existingState?.partialTakeProfitExecuted),
+          lastQty: holding.holdQty,
+        };
+        if (existingState) {
+          await db.update(autoPositionStates).set(stateData).where(eq(autoPositionStates.id, existingState.id));
+        } else {
+          await db.insert(autoPositionStates).values({
             userId,
             stockCode: holding.stockCode,
-            stockName: watchlistItem?.stockName || holding.stockCode,
-            orderType: "sell",
-            priceType: "market",
-            quantity: holding.holdQty,
-            price: String(currentPrice),
-            status: orderResult.success ? "pending" : "rejected",
-            kisOrderNo: orderResult.orderNo,
-            strategyId: "stop_loss_take_profit",
             accountProfileId: config.accountProfileId ?? null,
-            isAutoOrder: true,
-            errorMsg: orderResult.success ? null : orderResult.message,
+            ...stateData,
           });
+        }
 
-          if (orderResult.success) {
-            const emoji = exitReason.startsWith("손절") ? "🛑" : "💰";
-            await sendTelegramMessage(userId, "order",
-              `${emoji} *${exitReason.startsWith("손절") ? "손절" : "익절"} 자동 청산*\n\n` +
-              `종목: ${holding.stockCode}\n` +
-              `수량: ${holding.holdQty}주\n` +
-              `평단가: ${avgPrice.toLocaleString()}원\n` +
-              `현재가: ${currentPrice.toLocaleString()}원\n` +
-              `수익률: ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`
-            );
-            await log(userId, "info",
-              `${exitReason.startsWith("손절") ? "손절" : "익절"} 청산 주문 접수: ${holding.stockCode} ${holding.holdQty}주`,
-              holding.stockCode
-            );
-          } else {
-            await sendTelegramMessage(userId, "error",
-              `❌ ${exitReason.startsWith("손절") ? "손절" : "익절"} 청산 실패: ${holding.stockCode}\n사유: ${orderResult.message}`
-            );
+        if (!exitDecision.action) continue;
+
+        await log(userId, "signal", `${holding.stockCode} ${exitDecision.action.reason}`, holding.stockCode, exitDecision.action.strategyId, exitDecision);
+
+        const orderResult = await client.placeOrder(
+          holding.stockCode, "sell", exitDecision.action.quantity, currentPrice, "market"
+        );
+
+        const watchlistItem = (await db.select().from(watchlist)
+          .where(and(eq(watchlist.userId, userId), eq(watchlist.stockCode, holding.stockCode)))
+          .limit(1))[0];
+
+        await db.insert(orders).values({
+          userId,
+          stockCode: holding.stockCode,
+          stockName: watchlistItem?.stockName || holding.stockCode,
+          orderType: "sell",
+          priceType: "market",
+          quantity: exitDecision.action.quantity,
+          price: String(currentPrice),
+          status: orderResult.success ? "pending" : "rejected",
+          kisOrderNo: orderResult.orderNo,
+          strategyId: exitDecision.action.strategyId,
+          accountProfileId: config.accountProfileId ?? null,
+          isAutoOrder: true,
+          errorMsg: orderResult.success ? null : orderResult.message,
+        });
+
+        if (orderResult.success) {
+          if (exitDecision.action.kind === "partial_take_profit") {
+            const refreshedState = (await db.select().from(autoPositionStates).where(
+              and(
+                eq(autoPositionStates.userId, userId),
+                eq(autoPositionStates.stockCode, holding.stockCode),
+                config.accountProfileId == null
+                  ? isNull(autoPositionStates.accountProfileId)
+                  : eq(autoPositionStates.accountProfileId, config.accountProfileId)
+              )
+            ).limit(1))[0];
+            if (refreshedState) {
+              await db.update(autoPositionStates).set({ partialTakeProfitExecuted: true }).where(eq(autoPositionStates.id, refreshedState.id));
+            }
           }
+
+          await sendTelegramMessage(userId, "order",
+            `✅ *자동 청산 주문 접수*\n\n` +
+            `종목: ${holding.stockCode}\n` +
+            `수량: ${exitDecision.action.quantity}주\n` +
+            `평단가: ${avgPrice.toLocaleString()}원\n` +
+            `현재가: ${currentPrice.toLocaleString()}원\n` +
+            `수익률: ${exitDecision.pnlPct >= 0 ? "+" : ""}${exitDecision.pnlPct.toFixed(2)}%\n` +
+            `사유: ${exitDecision.action.reason}`
+          );
+          await log(userId, "info", `자동 청산 주문 접수: ${holding.stockCode} ${exitDecision.action.quantity}주 (${exitDecision.action.kind})`, holding.stockCode);
+        } else {
+          await sendTelegramMessage(userId, "error",
+            `❌ 자동 청산 실패: ${holding.stockCode}\n사유: ${orderResult.message}`
+          );
         }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      await log(userId, "error", `손절/익절 체크 오류: ${message}`);
+      await log(userId, "error", `자동 청산 체크 오류: ${message}`);
     }
   }
 
