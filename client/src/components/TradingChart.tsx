@@ -105,6 +105,13 @@ const CHART_THEME = {
   border: "#313238",
 };
 
+function formatVolume(value?: number) {
+  if (!value) return "--";
+  if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억`;
+  if (value >= 10_000) return `${(value / 10_000).toFixed(1)}만`;
+  return value.toLocaleString("ko-KR");
+}
+
 export default function TradingChart({ stockCode, stockName }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -168,7 +175,14 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       });
     }
     // Update crosshair display
-    setCrosshairData(prev => ({ ...prev, close: price, high: Math.max(high || price, price), low: Math.min(low || price, price) }));
+    setCrosshairData(prev => ({
+      ...prev,
+      open: open || price,
+      close: price,
+      high: Math.max(high || price, price),
+      low: Math.min(low || price, price),
+      volume: volume || prev.volume,
+    }));
   }, [realtimeQuote, period]);
 
   const toggleIndicator = useCallback((ind: Indicator) => {
@@ -226,19 +240,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     });
     candleSeriesRef.current = candleSeries;
 
-    chart.subscribeCrosshairMove((param) => {
-      if (!param.time || !param.seriesData) return;
-      const data = param.seriesData.get(candleSeries) as CandlestickData | undefined;
-      if (data) {
-        setCrosshairData({ time: String(param.time), open: data.open, high: data.high, low: data.low, close: data.close });
-      }
-    });
-
     const volChart = createChart(volumeContainerRef.current, {
       ...baseChartOptions,
       width: volumeContainerRef.current.clientWidth,
       height: volumeContainerRef.current.clientHeight,
-      rightPriceScale: { ...baseChartOptions.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.0 }, mode: PriceScaleMode.Logarithmic },
+      rightPriceScale: { ...baseChartOptions.rightPriceScale, scaleMargins: { top: 0.12, bottom: 0.02 }, mode: PriceScaleMode.Normal },
       timeScale: { ...baseChartOptions.timeScale, visible: false },
     });
     volChartRef.current = volChart;
@@ -246,8 +252,27 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     const volSeries = volChart.addSeries(HistogramSeries, {
       color: "rgba(33, 150, 243, 0.6)",
       priceFormat: { type: "volume" },
+      priceLineVisible: false,
+      lastValueVisible: true,
     });
     volSeriesRef.current = volSeries;
+    volChart.timeScale().fitContent();
+
+    chart.subscribeCrosshairMove((param) => {
+      if (!param.time || !param.seriesData) return;
+      const data = param.seriesData.get(candleSeries) as CandlestickData | undefined;
+      const volume = param.seriesData.get(volSeries) as HistogramData | undefined;
+      if (data) {
+        setCrosshairData({
+          time: String(param.time),
+          open: data.open,
+          high: data.high,
+          low: data.low,
+          close: data.close,
+          volume: volume?.value,
+        });
+      }
+    });
 
     // Sync timescales
     const syncCharts = [volChart];
@@ -362,6 +387,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       color: d.close >= (i > 0 ? ohlcv[i - 1].close : d.close) ? "rgba(38, 166, 90, 0.6)" : "rgba(239, 83, 80, 0.6)",
     }));
     volSeriesRef.current.setData(volData);
+    volChartRef.current?.timeScale().fitContent();
 
     // Remove old MA/BB series
     maSeriesRefs.current.forEach((s) => chartRef.current?.removeSeries(s));
@@ -493,7 +519,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
                 O:{displayData.open?.toLocaleString()} H:{displayData.high?.toLocaleString()} L:{displayData.low?.toLocaleString()}
               </span>
               {displayData.volume && (
-                <span className="text-muted-foreground">V:{(displayData.volume / 1000).toFixed(0)}K</span>
+                <span className="text-muted-foreground">거래량:{formatVolume(displayData.volume)}</span>
               )}
             </div>
           )}
@@ -585,7 +611,10 @@ export default function TradingChart({ stockCode, stockName }: Props) {
 
       {/* Volume Chart */}
       {indicators.has("volume") && (
-        <div className="h-16 border-t border-border">
+        <div className="relative h-24 md:h-16 border-t border-border">
+          <div className="absolute right-3 mt-1 z-[1] text-[10px] text-muted-foreground pointer-events-none">
+            거래량 {formatVolume(displayData.volume)}
+          </div>
           <div ref={volumeContainerRef} className="w-full h-full" />
         </div>
       )}

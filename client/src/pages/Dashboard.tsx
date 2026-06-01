@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -42,6 +42,15 @@ export default function Dashboard() {
   } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
   const [isMobile, setIsMobile] = useState(false);
+  const mobileWatchlistDrawerRef = useRef<HTMLDetailsElement>(null);
+
+  const selectStock = (code: string, name: string, nextMobileTab?: MobileTab) => {
+    setSelectedStock({ code, name });
+    if (nextMobileTab) setMobileTab(nextMobileTab);
+    if (mobileWatchlistDrawerRef.current) {
+      mobileWatchlistDrawerRef.current.open = false;
+    }
+  };
 
   // 모바일 감지
   useEffect(() => {
@@ -247,24 +256,81 @@ export default function Dashboard() {
   // ─── 모바일 레이아웃 ───────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div className="h-screen flex flex-col bg-background overflow-hidden">
+      <div className="mobile-trading-shell h-screen flex flex-col bg-background overflow-hidden">
         {signalBannerEl}
-        {header}
+        <header className="mobile-trading-header flex items-center justify-between px-3 py-2 border-b border-border bg-card shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <BarChart2 size={15} className="text-primary" />
+              <span className="font-bold text-sm">KIS Trader</span>
+              <span className={`text-[10px] ${kisSettings?.isActive ? "text-bull" : "text-muted-foreground"}`}>
+                {kisSettings?.isActive ? (kisSettings.mode === "real" ? "실전" : "모의") : "미연결"}
+              </span>
+            </div>
+            {selectedStock && (
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                <span className="text-foreground font-medium">{selectedStock.name}</span>
+                <span className="ml-1 font-mono">{selectedStock.code}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowAccountManager(true)}
+              className="min-h-9 px-2 rounded-lg text-[11px] text-muted-foreground bg-secondary/70"
+              title="계좌 관리"
+            >
+              계좌
+            </button>
+            <button
+              onClick={() => setShowKisSettings(true)}
+              className={`min-h-9 px-2 rounded-lg text-[11px] ${kisSettings?.hasAppKey ? "text-muted-foreground bg-secondary/70" : "text-bear bg-bear/10"}`}
+              title="KIS API 설정"
+            >
+              API
+            </button>
+          </div>
+        </header>
+
+        <details ref={mobileWatchlistDrawerRef} className="mobile-watchlist-drawer">
+          <summary aria-label="관심종목 열기" title="관심종목 열기">
+            <Star size={19} />
+            <span>관심</span>
+          </summary>
+          <div className="mobile-watchlist-backdrop" />
+          <aside className="mobile-watchlist-sheet" aria-label="관심종목 선택">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div>
+                <div className="text-sm font-semibold">관심종목</div>
+                <div className="text-[11px] text-muted-foreground">선택하면 차트로 바로 이동합니다</div>
+              </div>
+              <button
+                onClick={() => {
+                  if (mobileWatchlistDrawerRef.current) mobileWatchlistDrawerRef.current.open = false;
+                }}
+                className="min-h-9 px-3 rounded-lg bg-secondary text-xs text-muted-foreground"
+              >
+                닫기
+              </button>
+            </div>
+            <WatchlistPanel
+              selectedCode={selectedStock?.code || null}
+              onSelect={(code, name) => selectStock(code, name, "chart")}
+            />
+          </aside>
+        </details>
 
         {/* 모바일 메인 콘텐츠 */}
-        <div className="flex-1 overflow-hidden">
+        <div className="mobile-main-content flex-1 overflow-hidden">
           {mobileTab === "watchlist" && (
             <WatchlistPanel
               selectedCode={selectedStock?.code || null}
-              onSelect={(code, name) => {
-                setSelectedStock({ code, name });
-                setMobileTab("chart");
-              }}
+              onSelect={(code, name) => selectStock(code, name, "chart")}
             />
           )}
 
           {mobileTab === "chart" && (
-            <div className="h-full flex flex-col">
+            <div className="mobile-chart-screen h-full flex flex-col">
               {selectedStock ? (
                 <TradingChart stockCode={selectedStock.code} stockName={selectedStock.name} />
               ) : (
@@ -345,8 +411,7 @@ export default function Dashboard() {
                 {rightTab === "screener" && (
                   <ScreenerPanel
                     onSelectStock={(code, name) => {
-                      setSelectedStock({ code, name: name || code });
-                      setMobileTab("chart");
+                      selectStock(code, name || code, "chart");
                     }}
                   />
                 )}
@@ -405,7 +470,7 @@ export default function Dashboard() {
         >
           <WatchlistPanel
             selectedCode={selectedStock?.code || null}
-            onSelect={(code, name) => setSelectedStock({ code, name })}
+            onSelect={(code, name) => selectStock(code, name)}
           />
         </div>
 

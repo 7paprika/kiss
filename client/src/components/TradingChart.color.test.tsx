@@ -60,4 +60,24 @@ describe("chart compatibility", () => {
 
     expect(source).toContain("connectMutation.mutate({ id: acc.id })");
   });
+
+  it("uses a mobile-only chart shell with a left floating native watchlist drawer", () => {
+    const dashboard = readFileSync(resolve(process.cwd(), "client/src/pages/Dashboard.tsx"), "utf8");
+    const css = readFileSync(resolve(process.cwd(), "client/src/index.css"), "utf8");
+
+    expect(dashboard).toContain("mobile-trading-shell");
+    expect(dashboard).toContain("mobile-watchlist-drawer");
+    expect(dashboard).toContain("<summary");
+    expect(dashboard).toContain("관심종목 열기");
+    expect(css).toContain(".mobile-watchlist-drawer[open]");
+  });
+
+  it("keeps volume on a dedicated linear chart with a visible value label", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain("mode: PriceScaleMode.Normal");
+    expect(source).toContain("volChart.timeScale().fitContent()");
+    expect(source).toContain("거래량");
+    expect(source).toContain("formatVolume(displayData.volume)");
+  });
 });

@@ -236,3 +236,107 @@ input[type="checkbox"] {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Mobile trading shell */
+.mobile-trading-shell {
+  height: 100dvh;
+  height: 100svh;
+  touch-action: manipulation;
+}
+
+.mobile-trading-header {
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+}
+
+.mobile-main-content {
+  padding-left: 54px;
+}
+
+.mobile-chart-screen .panel-header {
+  padding: 10px 12px;
+}
+
+.mobile-watchlist-drawer {
+  position: fixed;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  top: calc(max(74px, env(safe-area-inset-top, 0px) + 66px));
+  z-index: 40;
+}
+
+.mobile-watchlist-drawer > summary {
+  list-style: none;
+  width: 46px;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid oklch(0.62 0.18 200 / 0.45);
+  border-radius: 999px;
+  background: oklch(0.16 0.01 240 / 0.94);
+  color: var(--primary);
+  box-shadow: 0 14px 32px rgb(0 0 0 / 0.36);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-watchlist-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobile-watchlist-drawer > summary span {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.mobile-watchlist-backdrop,
+.mobile-watchlist-sheet {
+  display: none;
+}
+
+.mobile-watchlist-drawer[open] {
+  inset: 0;
+  left: 0;
+  top: 0;
+  z-index: 60;
+}
+
+.mobile-watchlist-drawer[open] > summary {
+  position: fixed;
+  left: max(8px, env(safe-area-inset-left, 0px));
+  top: calc(max(74px, env(safe-area-inset-top, 0px) + 66px));
+}
+
+.mobile-watchlist-drawer[open] .mobile-watchlist-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.54);
+}
+
+.mobile-watchlist-drawer[open] .mobile-watchlist-sheet {
+  display: flex;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(86vw, 340px);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 18px 0 40px rgb(0 0 0 / 0.42);
+}
+
+@media (min-width: 768px) {
+  .mobile-watchlist-drawer {
+    display: none;
+  }
+  .mobile-main-content {
+    padding-left: 0;
+  }
+}
