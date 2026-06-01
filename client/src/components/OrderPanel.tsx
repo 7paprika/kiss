@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Wallet, ListOrdered, X, RefreshCw, BookOpen } from "lucide-react";
@@ -16,12 +16,25 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
   const [priceType, setPriceType] = useState<"market" | "limit">("limit");
   const [price, setPrice] = useState("");
   const [quantity, setQuantity] = useState("");
+  const [tradeMode, setTradeMode] = useState<"cash" | "credit">("cash");
+  const [creditType, setCreditType] = useState<"21" | "23" | "25" | "27">("21");
+  const [loanDate, setLoanDate] = useState(() => {
+    const now = new Date();
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    return kst.toISOString().slice(0, 10).replace(/-/g, "");
+  });
 
   const utils = trpc.useUtils();
   const { data: kisSettings } = trpc.kis.getSettings.useQuery(undefined, {
     staleTime: 60_000,
   });
   const isKisActive = Boolean(kisSettings?.isActive);
+
+  useEffect(() => {
+    if (tab === "buy" && !["21", "23"].includes(creditType)) setCreditType("21");
+    if (tab === "sell" && !["25", "27"].includes(creditType)) setCreditType("25");
+  }, [tab, creditType]);
+
   const { data: currentPrice } = trpc.kis.getCurrentPrice.useQuery(
     { stockCode },
     { enabled: isKisActive && !!stockCode, refetchInterval: 3000, retry: false }
@@ -61,8 +74,13 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
     if (priceType === "limit" && (!price || parseFloat(price) <= 0)) {
       toast.error("지정가를 입력하세요"); return;
     }
+    if (tradeMode === "credit" && !/^\d{8}$/.test(loanDate)) {
+      toast.error("대출일자는 YYYYMMDD 형식으로 입력하세요"); return;
+    }
     placeMutation.mutate({
-      stockCode, stockName, orderType, priceType,
+      stockCode, stockName, orderType, priceType, tradeMode,
+      creditType: tradeMode === "credit" ? creditType : undefined,
+      loanDate: tradeMode === "credit" ? loanDate : undefined,
       quantity: qty,
       price: priceType === "limit" ? parseFloat(price) : undefined,
     });
@@ -124,6 +142,66 @@ export default function OrderPanel({ stockCode, stockName }: Props) {
                   <span className={`text-xs ml-2 font-mono ${currentPrice.changePrice >= 0 ? "text-bull" : "text-bear"}`}>
                     {currentPrice.changePrice >= 0 ? "+" : ""}{currentPrice.changeRate.toFixed(2)}%
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* Trade Mode */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">거래 구분</label>
+              <div className="flex gap-1">
+                {(["cash", "credit"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setTradeMode(mode)}
+                    className={`flex-1 py-1.5 rounded text-xs transition-colors ${
+                      tradeMode === mode
+                        ? "bg-primary/20 text-primary border border-primary/50"
+                        : "bg-secondary text-muted-foreground border border-border"
+                    }`}
+                  >
+                    {mode === "cash" ? "현금거래" : "신용거래"}
+                  </button>
+                ))}
+              </div>
+              {tradeMode === "credit" && kisSettings?.mode === "paper" && (
+                <p className="text-[10px] text-bear mt-1">KIS 신용주문은 실전투자 계좌에서만 지원됩니다.</p>
+              )}
+            </div>
+
+            {tradeMode === "credit" && (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">신용유형</label>
+                  <select
+                    value={creditType}
+                    onChange={(e) => setCreditType(e.target.value as typeof creditType)}
+                    className="w-full text-xs"
+                  >
+                    {tab === "buy" ? (
+                      <>
+                        <option value="21">자기융자신규</option>
+                        <option value="23">유통융자신규</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="25">자기융자상환</option>
+                        <option value="27">유통융자상환</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">대출일자</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={loanDate}
+                    onChange={(e) => setLoanDate(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                    placeholder="YYYYMMDD"
+                    className="w-full text-right font-mono text-xs"
+                  />
                 </div>
               </div>
             )}

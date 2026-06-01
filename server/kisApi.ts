@@ -74,6 +74,15 @@ export interface KisOrderResult {
   message: string;
 }
 
+export type KisTradeMode = "cash" | "credit";
+export type KisCreditType = "21" | "23" | "25" | "27";
+
+export interface KisOrderOptions {
+  tradeMode?: KisTradeMode;
+  creditType?: KisCreditType;
+  loanDate?: string;
+}
+
 export interface KisPendingOrder {
   orderNo: string;
   stockCode: string;
@@ -362,33 +371,57 @@ export class KisApiClient {
     orderType: "buy" | "sell",
     quantity: number,
     price: number,
-    priceType: "market" | "limit"
+    priceType: "market" | "limit",
+    options: KisOrderOptions = {}
   ): Promise<KisOrderResult> {
     const isBuy = orderType === "buy";
-    const trId = this.credentials.mode === "real"
-      ? (isBuy ? "TTTC0802U" : "TTTC0801U")
-      : (isBuy ? "VTTC0802U" : "VTTC0801U");
-
+    const tradeMode = options.tradeMode ?? "cash";
     const ordDvsn = priceType === "market" ? "01" : "00"; // 01=시장가, 00=지정가
+
+    if (tradeMode === "credit" && this.credentials.mode !== "real") {
+      return {
+        orderNo: "",
+        orderTime: "",
+        success: false,
+        message: "KIS 신용주문은 모의투자에서 지원되지 않아 실전투자 계좌에서만 사용할 수 있습니다.",
+      };
+    }
+
+    const trId = tradeMode === "credit"
+      ? (isBuy ? "TTTC0052U" : "TTTC0051U")
+      : this.credentials.mode === "real"
+        ? (isBuy ? "TTTC0802U" : "TTTC0801U")
+        : (isBuy ? "VTTC0802U" : "VTTC0801U");
+    const path = tradeMode === "credit"
+      ? "/uapi/domestic-stock/v1/trading/order-credit"
+      : "/uapi/domestic-stock/v1/trading/order-cash";
+
+    const body: Record<string, unknown> = {
+      CANO: this.credentials.accountNo,
+      ACNT_PRDT_CD: this.credentials.accountProduct,
+      PDNO: stockCode,
+      ORD_DVSN: ordDvsn,
+      ORD_QTY: String(quantity),
+      ORD_UNPR: priceType === "market" ? "0" : String(price),
+    };
+
+    if (tradeMode === "credit") {
+      body.CRDT_TYPE = options.creditType;
+      body.LOAN_DT = options.loanDate;
+      body.RSVN_ORD_YN = "N";
+    }
 
     try {
       const data = await this.request<{ output: Record<string, string> }>(
         "POST",
-        "/uapi/domestic-stock/v1/trading/order-cash",
+        path,
         trId,
         undefined,
-        {
-          CANO: this.credentials.accountNo,
-          ACNT_PRDT_CD: this.credentials.accountProduct,
-          PDNO: stockCode,
-          ORD_DVSN: ordDvsn,
-          ORD_QTY: String(quantity),
-          ORD_UNPR: priceType === "market" ? "0" : String(price),
-        }
+        body
       );
       return {
-        orderNo: data.output?.ODNO || "",
-        orderTime: data.output?.ORD_TMD || "",
+        orderNo: data.output?.ODNO || data.output?.odno || "",
+        orderTime: data.output?.ORD_TMD || data.output?.ord_tmd || "",
         success: true,
         message: "주문 성공",
       };

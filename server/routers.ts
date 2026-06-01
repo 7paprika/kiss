@@ -254,16 +254,28 @@ const kisRouter = router({
     stockName: z.string().optional(),
     orderType: z.enum(["buy", "sell"]),
     priceType: z.enum(["market", "limit"]),
+    tradeMode: z.enum(["cash", "credit"]).default("cash"),
+    creditType: z.enum(["21", "23", "25", "27"]).optional(),
+    loanDate: z.string().regex(/^\d{8}$/, "대출일자는 YYYYMMDD 형식이어야 합니다").optional(),
     quantity: z.number().int().positive(),
     price: z.number().optional(),
   })).mutation(async ({ ctx, input }) => {
     if (!checkRateLimit(`order-${ctx.user.id}`, 10, 60_000)) throw new Error("Rate limit exceeded");
+    if (input.tradeMode === "credit") {
+      if (!input.creditType) throw new Error("신용유형을 선택하세요");
+      if (!input.loanDate) throw new Error("대출일자를 입력하세요");
+      const validForOrder = input.orderType === "buy" ? ["21", "23"] : ["25", "27"];
+      if (!validForOrder.includes(input.creditType)) {
+        throw new Error(input.orderType === "buy" ? "신용매수는 융자신규 유형만 선택할 수 있습니다" : "신용매도는 융자상환 유형만 선택할 수 있습니다");
+      }
+    }
     const client = await initKisClientForUser(ctx.user.id);
     if (!client) throw new Error("KIS API 연결이 필요합니다");
 
     const result = await client.placeOrder(
       input.stockCode, input.orderType, input.quantity,
-      input.price || 0, input.priceType
+      input.price || 0, input.priceType,
+      { tradeMode: input.tradeMode, creditType: input.creditType, loanDate: input.loanDate }
     );
 
     const db = await getDb();
@@ -274,6 +286,9 @@ const kisRouter = router({
         stockName: input.stockName,
         orderType: input.orderType,
         priceType: input.priceType,
+        tradeMode: input.tradeMode,
+        creditType: input.tradeMode === "credit" ? input.creditType : null,
+        loanDate: input.tradeMode === "credit" ? input.loanDate : null,
         quantity: input.quantity,
         price: input.price ? String(input.price) : null,
         status: result.success ? "pending" : "rejected",
@@ -287,6 +302,7 @@ const kisRouter = router({
       await sendTelegramMessage(ctx.user.id, "order",
         `📋 *수동 ${input.orderType === "buy" ? "매수" : "매도"} 주문*\n\n` +
         `종목: ${input.stockCode} ${input.stockName || ""}\n` +
+        `거래: ${input.tradeMode === "credit" ? `신용(${input.creditType}, ${input.loanDate})` : "현금"}\n` +
         `수량: ${input.quantity}주\n` +
         `유형: ${input.priceType === "market" ? "시장가" : `지정가 ${input.price?.toLocaleString()}원`}\n` +
         `주문번호: ${result.orderNo}`
