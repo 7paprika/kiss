@@ -45,4 +45,13 @@ describe("chart compatibility", () => {
     expect(orderbookSource).toContain("isKisActive: boolean");
     expect(orderbookSource).toContain("enabled: isKisActive && !!stockCode");
   });
+
+  it("refreshes cached KIS settings after saving or connecting in the settings modal", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/KisSettingsModal.tsx"), "utf8");
+
+    expect(source).toContain("const utils = trpc.useUtils()");
+    expect(source.match(/utils\.kis\.getSettings\.invalidate\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source.match(/utils\.kis\.listAccounts\.invalidate\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("KIS API 연결 성공");
+  });
 });

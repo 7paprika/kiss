@@ -15,13 +15,27 @@ export default function KisSettingsModal({ onClose }: Props) {
   const [mode, setMode] = useState<"real" | "paper">("paper");
   const [showSecret, setShowSecret] = useState(false);
 
+  const utils = trpc.useUtils();
   const { data: settings } = trpc.kis.getSettings.useQuery();
   const saveMutation = trpc.kis.saveSettings.useMutation({
-    onSuccess: () => { toast.success("API 설정이 저장되었습니다"); onClose(); },
+    onSuccess: async () => {
+      await Promise.all([
+        utils.kis.getSettings.invalidate(),
+        utils.kis.listAccounts.invalidate(),
+      ]);
+      toast.success("API 설정이 저장되었습니다");
+      onClose();
+    },
     onError: (e) => toast.error(e.message),
   });
   const connectMutation = trpc.kis.connect.useMutation({
-    onSuccess: () => toast.success("KIS API 연결 성공"),
+    onSuccess: async () => {
+      await Promise.all([
+        utils.kis.getSettings.invalidate(),
+        utils.kis.listAccounts.invalidate(),
+      ]);
+      toast.success("KIS API 연결 성공");
+    },
     onError: (e) => toast.error(`연결 실패: ${e.message}`),
   });
 
