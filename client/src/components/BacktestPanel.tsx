@@ -13,13 +13,13 @@ type TabType = "single" | "compare";
 
 // Colors for multi-strategy comparison chart
 const STRATEGY_COLORS = [
-  "oklch(0.62 0.18 145)",  // green
-  "oklch(0.65 0.20 240)",  // blue
-  "oklch(0.70 0.18 60)",   // yellow
-  "oklch(0.65 0.22 300)",  // purple
-  "oklch(0.65 0.22 25)",   // orange
-  "oklch(0.60 0.20 180)",  // teal
-  "oklch(0.58 0.22 0)",    // red
+  "#26a65a",  // green
+  "#3b82f6",  // blue
+  "#f5c542",   // yellow
+  "#b46cff",  // purple
+  "#f97316",   // orange
+  "#14b8a6",  // teal
+  "#ef4444",    // red
 ];
 
 export default function BacktestPanel({ selectedStockCode, selectedStockName }: Props) {
@@ -296,15 +296,15 @@ export default function BacktestPanel({ selectedStockCode, selectedStockName }: 
                   <div className="h-28 bg-secondary/20 rounded">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={equityCurveData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: "oklch(0.55 0.01 240)" }} tickLine={false} interval="preserveStartEnd" />
-                        <YAxis tick={{ fontSize: 9, fill: "oklch(0.55 0.01 240)" }} tickLine={false} axisLine={false} width={40} />
+                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#85878d" }} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis tick={{ fontSize: 9, fill: "#85878d" }} tickLine={false} axisLine={false} width={40} />
                         <Tooltip
-                          contentStyle={{ background: "oklch(0.2 0.01 240)", border: "1px solid oklch(0.3 0.01 240)", fontSize: 10 }}
+                          contentStyle={{ background: "#222329", border: "1px solid #3a3b42", fontSize: 10 }}
                           formatter={(v: number) => [`${v.toLocaleString()}만원`, "자산"]}
                         />
-                        <ReferenceLine y={initialCapital / 10_000} stroke="oklch(0.45 0.01 240)" strokeDasharray="3 3" />
+                        <ReferenceLine y={initialCapital / 10_000} stroke="#6f7178" strokeDasharray="3 3" />
                         <Line type="monotone" dataKey="equity"
-                          stroke={result.totalReturn >= 0 ? "oklch(0.62 0.18 145)" : "oklch(0.58 0.22 25)"}
+                          stroke={result.totalReturn >= 0 ? "#26a65a" : "#ef5350"}
                           dot={false} strokeWidth={1.5} />
                       </LineChart>
                     </ResponsiveContainer>
@@ -559,17 +559,17 @@ export default function BacktestPanel({ selectedStockCode, selectedStockName }: 
                   <div className="h-40 bg-secondary/20 rounded">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={compareChartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: "oklch(0.55 0.01 240)" }} tickLine={false} interval="preserveStartEnd" />
-                        <YAxis tick={{ fontSize: 9, fill: "oklch(0.55 0.01 240)" }} tickLine={false} axisLine={false} width={40} />
+                        <XAxis dataKey="date" tick={{ fontSize: 9, fill: "#85878d" }} tickLine={false} interval="preserveStartEnd" />
+                        <YAxis tick={{ fontSize: 9, fill: "#85878d" }} tickLine={false} axisLine={false} width={40} />
                         <Tooltip
-                          contentStyle={{ background: "oklch(0.2 0.01 240)", border: "1px solid oklch(0.3 0.01 240)", fontSize: 10 }}
+                          contentStyle={{ background: "#222329", border: "1px solid #3a3b42", fontSize: 10 }}
                           formatter={(v: number, name: string) => {
                             const idx = parseInt(name.replace("s", ""));
                             const stratName = compareResults[idx]?.strategyName || name;
                             return [`${v.toLocaleString()}만원`, stratName];
                           }}
                         />
-                        <ReferenceLine y={cmpCapital / 10_000} stroke="oklch(0.45 0.01 240)" strokeDasharray="3 3" />
+                        <ReferenceLine y={cmpCapital / 10_000} stroke="#6f7178" strokeDasharray="3 3" />
                         {compareResults.map((r: CompareResult, i: number) => (
                           <Line
                             key={r.strategyId}

@@ -99,10 +99,10 @@ function calcStochastic(highs: number[], lows: number[], closes: number[], k = 1
 }
 
 const CHART_THEME = {
-  bg: "oklch(0.16 0.01 240)",
-  text: "oklch(0.55 0.01 240)",
-  grid: "oklch(0.22 0.01 240)",
-  border: "oklch(0.25 0.01 240)",
+  bg: "#18191d",
+  text: "#85878d",
+  grid: "#2a2b30",
+  border: "#313238",
 };
 
 export default function TradingChart({ stockCode, stockName }: Props) {
@@ -211,12 +211,12 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     chartRef.current = chart;
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "oklch(0.62 0.18 145)",
-      downColor: "oklch(0.58 0.22 25)",
-      borderUpColor: "oklch(0.62 0.18 145)",
-      borderDownColor: "oklch(0.58 0.22 25)",
-      wickUpColor: "oklch(0.62 0.18 145)",
-      wickDownColor: "oklch(0.58 0.22 25)",
+      upColor: "#26a65a",
+      downColor: "#ef5350",
+      borderUpColor: "#26a65a",
+      borderDownColor: "#ef5350",
+      wickUpColor: "#26a65a",
+      wickDownColor: "#ef5350",
     });
     candleSeriesRef.current = candleSeries;
 
@@ -238,7 +238,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     volChartRef.current = volChart;
 
     const volSeries = volChart.addSeries(HistogramSeries, {
-      color: "oklch(0.62 0.18 200 / 0.6)",
+      color: "rgba(33, 150, 243, 0.6)",
       priceFormat: { type: "volume" },
     });
     volSeriesRef.current = volSeries;
@@ -350,7 +350,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     const volData: HistogramData[] = ohlcv.map((d, i) => ({
       time: times[i],
       value: d.volume,
-      color: d.close >= (i > 0 ? ohlcv[i - 1].close : d.close) ? "oklch(0.62 0.18 145 / 0.6)" : "oklch(0.58 0.22 25 / 0.6)",
+      color: d.close >= (i > 0 ? ohlcv[i - 1].close : d.close) ? "rgba(38, 166, 90, 0.6)" : "rgba(239, 83, 80, 0.6)",
     }));
     volSeriesRef.current.setData(volData);
 
@@ -363,10 +363,10 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     // Moving Averages
     if (indicators.has("ma")) {
       const maConfigs = [
-        { period: 5, color: "oklch(0.75 0.18 60)" },
-        { period: 20, color: "oklch(0.62 0.18 200)" },
-        { period: 60, color: "oklch(0.72 0.18 300)" },
-        { period: 120, color: "oklch(0.65 0.18 30)" },
+        { period: 5, color: "#f5c542" },
+        { period: 20, color: "#2196f3" },
+        { period: 60, color: "#b46cff" },
+        { period: 120, color: "#f97316" },
       ];
       for (const { period: p, color } of maConfigs) {
         if (ohlcv.length < p) continue;
@@ -381,7 +381,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     // Bollinger Bands
     if (indicators.has("bb")) {
       const bbValues = calcBB(closes);
-      const bbColor = "oklch(0.72 0.12 240 / 0.7)";
+      const bbColor = "rgba(125, 142, 168, 0.7)";
       const upperData: LineData[] = times.map((t, i) => ({ time: t, value: bbValues[i].upper })).filter((d): d is LineData => d.value !== null);
       const middleData: LineData[] = times.map((t, i) => ({ time: t, value: bbValues[i].middle })).filter((d): d is LineData => d.value !== null);
       const lowerData: LineData[] = times.map((t, i) => ({ time: t, value: bbValues[i].lower })).filter((d): d is LineData => d.value !== null);
@@ -408,14 +408,14 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       const histData: HistogramData[] = times.map((t, i) => ({
         time: t,
         value: macdValues[i].histogram ?? 0,
-        color: (macdValues[i].histogram ?? 0) >= 0 ? "oklch(0.62 0.18 145 / 0.7)" : "oklch(0.58 0.22 25 / 0.7)",
+        color: (macdValues[i].histogram ?? 0) >= 0 ? "rgba(38, 166, 90, 0.7)" : "rgba(239, 83, 80, 0.7)",
       })).filter((_, i) => macdValues[i].histogram !== null);
 
-      const macdLineSeries = macdChartRef.current.addSeries(LineSeries, { color: "oklch(0.62 0.18 200)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const macdLineSeries = macdChartRef.current.addSeries(LineSeries, { color: "#2196f3", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       macdLineSeries.setData(macdLine);
       macdSeriesRefs.current.set("macd", macdLineSeries);
 
-      const signalSeries = macdChartRef.current.addSeries(LineSeries, { color: "oklch(0.75 0.18 30)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const signalSeries = macdChartRef.current.addSeries(LineSeries, { color: "#ff8a3d", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       signalSeries.setData(signalLine);
       macdSeriesRefs.current.set("signal", signalSeries);
 
@@ -436,11 +436,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       const kData: LineData[] = times.map((t, i) => ({ time: t, value: stochValues[i].k })).filter((d): d is LineData => d.value !== null);
       const dData: LineData[] = times.map((t, i) => ({ time: t, value: stochValues[i].d })).filter((d): d is LineData => d.value !== null);
 
-      const kSeries = stochChartRef.current.addSeries(LineSeries, { color: "oklch(0.72 0.18 300)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const kSeries = stochChartRef.current.addSeries(LineSeries, { color: "#b46cff", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       kSeries.setData(kData);
       stochSeriesRefs.current.set("k", kSeries);
 
-      const dSeries = stochChartRef.current.addSeries(LineSeries, { color: "oklch(0.75 0.18 60)", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+      const dSeries = stochChartRef.current.addSeries(LineSeries, { color: "#f5c542", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
       dSeries.setData(dData);
       stochSeriesRefs.current.set("d", dSeries);
 
@@ -534,10 +534,10 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       {indicators.has("ma") && (
         <div className="flex items-center gap-3 px-3 py-1 text-[10px] border-b border-border/50">
           {[
-            { period: 5, color: "oklch(0.75 0.18 60)" },
-            { period: 20, color: "oklch(0.62 0.18 200)" },
-            { period: 60, color: "oklch(0.72 0.18 300)" },
-            { period: 120, color: "oklch(0.65 0.18 30)" },
+            { period: 5, color: "#f5c542" },
+            { period: 20, color: "#2196f3" },
+            { period: 60, color: "#b46cff" },
+            { period: 120, color: "#f97316" },
           ].map(({ period: p, color }) => {
             const ma = calcSMA(closes, p);
             const lastMa = ma[ma.length - 1];
@@ -574,8 +574,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
             <span className="text-green-400 font-semibold">MACD</span>
             {lastMacd && (
               <>
-                <span style={{ color: "oklch(0.62 0.18 200)" }}>MACD: {lastMacd.macd?.toFixed(2) ?? "--"}</span>
-                <span style={{ color: "oklch(0.75 0.18 30)" }}>Signal: {lastMacd.signal?.toFixed(2) ?? "--"}</span>
+                <span style={{ color: "#2196f3" }}>MACD: {lastMacd.macd?.toFixed(2) ?? "--"}</span>
+                <span style={{ color: "#ff8a3d" }}>Signal: {lastMacd.signal?.toFixed(2) ?? "--"}</span>
                 <span className={lastMacd.histogram !== null && lastMacd.histogram >= 0 ? "text-bull" : "text-bear"}>
                   Hist: {lastMacd.histogram?.toFixed(2) ?? "--"}
                 </span>
@@ -593,8 +593,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
             <span className="text-purple-400 font-semibold">STOCH</span>
             {lastStoch && (
               <>
-                <span style={{ color: "oklch(0.72 0.18 300)" }}>%K: {lastStoch.k?.toFixed(1) ?? "--"}</span>
-                <span style={{ color: "oklch(0.75 0.18 60)" }}>%D: {lastStoch.d?.toFixed(1) ?? "--"}</span>
+                <span style={{ color: "#b46cff" }}>%K: {lastStoch.k?.toFixed(1) ?? "--"}</span>
+                <span style={{ color: "#f5c542" }}>%D: {lastStoch.d?.toFixed(1) ?? "--"}</span>
                 {lastStoch.k !== null && (
                   <span className={lastStoch.k > 80 ? "text-bear" : lastStoch.k < 20 ? "text-bull" : "text-muted-foreground"}>
                     {lastStoch.k > 80 ? "과매수" : lastStoch.k < 20 ? "과매도" : "중립"}

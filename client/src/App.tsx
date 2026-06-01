@@ -43,9 +43,9 @@ function App() {
             position="bottom-right"
             toastOptions={{
               style: {
-                background: "oklch(0.16 0.01 240)",
-                border: "1px solid oklch(0.25 0.01 240)",
-                color: "oklch(0.92 0.01 240)",
+                background: "#18191d",
+                border: "1px solid #313238",
+                color: "#e6e7eb",
               },
             }}
           />
