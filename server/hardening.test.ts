@@ -121,6 +121,20 @@ describe("KIS access token refresh", () => {
   });
 });
 
+describe("KIS settings update semantics", () => {
+  it("allows keeping stored app credentials when saving account metadata", async () => {
+    const source = await import("node:fs/promises").then(fs => fs.readFile(new URL("./routers.ts", import.meta.url), "utf-8"));
+    const saveSettingsBlock = source.slice(source.indexOf("saveSettings:"), source.indexOf("connect: protectedProcedure"));
+
+    expect(saveSettingsBlock).toContain("appKey: z.string().optional()");
+    expect(saveSettingsBlock).toContain("appSecret: z.string().optional()");
+    expect(saveSettingsBlock).toContain("if (appKey) updateData.encryptedAppKey = encrypt(appKey)");
+    expect(saveSettingsBlock).toContain("if (appSecret) updateData.encryptedAppSecret = encrypt(appSecret)");
+    expect(saveSettingsBlock).toContain("if (!appKey) throw new Error(\"App Key를 입력하세요\")");
+    expect(saveSettingsBlock).toContain("if (!appSecret) throw new Error(\"App Secret을 입력하세요\")");
+  });
+});
+
 describe("daily realized PnL calculation", () => {
   it("pairs buys and sells instead of summing sell proceeds", async () => {
     const { calculateDailyRealizedPnl } = await import("./performance");

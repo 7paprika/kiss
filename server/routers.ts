@@ -135,8 +135,8 @@ const kisRouter = router({
   }),
 
   saveSettings: protectedProcedure.input(z.object({
-    appKey: z.string().min(1),
-    appSecret: z.string().min(1),
+    appKey: z.string().optional(),
+    appSecret: z.string().optional(),
     accountNo: z.string().min(1),
     accountProduct: z.string().default("01"),
     mode: z.enum(["real", "paper"]),
@@ -144,20 +144,31 @@ const kisRouter = router({
     const db = await getDb();
     if (!db) throw new Error("DB unavailable");
 
-    const encryptedAppKey = encrypt(input.appKey);
-    const encryptedAppSecret = encrypt(input.appSecret);
+    const appKey = input.appKey?.trim() ?? "";
+    const appSecret = input.appSecret?.trim() ?? "";
+    const accountNo = input.accountNo.trim();
 
     const existing = await db.select().from(kisSettings).where(eq(kisSettings.userId, ctx.user.id)).limit(1);
     if (existing.length) {
-      await db.update(kisSettings).set({
-        encryptedAppKey, encryptedAppSecret,
-        accountNo: input.accountNo, accountProduct: input.accountProduct,
-        mode: input.mode, isActive: false, accessToken: null, tokenExpiredAt: null,
-      }).where(eq(kisSettings.userId, ctx.user.id));
+      const updateData: Record<string, unknown> = {
+        accountNo,
+        accountProduct: input.accountProduct,
+        mode: input.mode,
+        isActive: false,
+        accessToken: null,
+        tokenExpiredAt: null,
+      };
+      if (appKey) updateData.encryptedAppKey = encrypt(appKey);
+      if (appSecret) updateData.encryptedAppSecret = encrypt(appSecret);
+      await db.update(kisSettings).set(updateData).where(eq(kisSettings.userId, ctx.user.id));
     } else {
+      if (!appKey) throw new Error("App Key를 입력하세요");
+      if (!appSecret) throw new Error("App Secret을 입력하세요");
+      const encryptedAppKey = encrypt(appKey);
+      const encryptedAppSecret = encrypt(appSecret);
       await db.insert(kisSettings).values({
         userId: ctx.user.id, encryptedAppKey, encryptedAppSecret,
-        accountNo: input.accountNo, accountProduct: input.accountProduct,
+        accountNo, accountProduct: input.accountProduct,
         mode: input.mode,
       });
     }
