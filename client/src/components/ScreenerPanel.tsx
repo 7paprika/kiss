@@ -24,6 +24,7 @@ export default function ScreenerPanel({ onSelectStock }: ScreenerPanelProps) {
   const [manualStrategyId, setManualStrategyId] = useState("bollinger_trading");
   const [isExpanded, setIsExpanded] = useState(true);
   const [universeResults, setUniverseResults] = useState<{
+    source: "rank-api" | "quote-scan";
     scanned: number;
     filtered: number;
     excluded: number;
@@ -181,7 +182,7 @@ export default function ScreenerPanel({ onSelectStock }: ScreenerPanelProps) {
               {universeResults && (
                 <div className="space-y-2 max-h-72 overflow-y-auto">
                   <div className="text-[10px] text-slate-500">
-                    시세조회 {universeResults.scanned.toLocaleString()}개 · 필터통과 {universeResults.filtered.toLocaleString()}개 · 제외 {universeResults.excluded.toLocaleString()}개
+                    후보소스 {universeResults.source === "rank-api" ? "KIS 거래대금/거래량 순위 API" : "개별 현재가 스캔"} · 시세조회 {universeResults.scanned.toLocaleString()}개 · 필터통과 {universeResults.filtered.toLocaleString()}개 · 제외 {universeResults.excluded.toLocaleString()}개
                   </div>
                   {universeResults.groups.map(group => (
                     <div key={group.strategyId} className="rounded bg-slate-900/60 border border-slate-700/40 p-2">

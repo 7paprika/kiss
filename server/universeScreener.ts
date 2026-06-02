@@ -1,4 +1,4 @@
-import type { KisApiClient, KisOHLCV } from "./kisApi";
+import type { KisApiClient, KisOHLCV, KisRankCandidate } from "./kisApi";
 import { loadKrxStocks, type StockSearchItem } from "./stockSearch";
 import { TRADING_STRATEGIES, type ITradingStrategy, type Signal } from "./strategies/index";
 
@@ -153,31 +153,63 @@ export function evaluateTradingStrategiesForUniverse(
   });
 }
 
+function rankCandidateToQuote(row: KisRankCandidate): UniverseQuote {
+  return {
+    code: row.code,
+    name: row.name,
+    market: row.market || "KRX",
+    price: row.price,
+    volume: row.volume,
+    amount: row.amount,
+  };
+}
+
 export async function buildWholeMarketUniverse(options: {
-  client: Pick<KisApiClient, "getCurrentPrice" | "getOHLCV"> & { getCurrentPriceDetail?: (stockCode: string) => Promise<UniverseQuote> };
+  client: Pick<KisApiClient, "getCurrentPrice" | "getOHLCV"> & {
+    getCurrentPriceDetail?: (stockCode: string) => Promise<UniverseQuote>;
+    getVolumeRankCandidates?: (options?: { minPrice?: number; maxPrice?: number; minVolume?: number; sort?: "volume" | "amount" | "turnover" | "change"; count?: number }) => Promise<KisRankCandidate[]>;
+  };
   filters?: UniverseFilterOptions;
   maxQuoteScan?: number;
   maxOhlcvFetch?: number;
   maxPerStrategy?: number;
   strategyIds?: string[];
-}): Promise<{ scanned: number; filtered: number; excluded: number; filters: UniverseFilterOptions; groups: StrategyUniverseGroup[] }> {
+}): Promise<{ source: "rank-api" | "quote-scan"; scanned: number; filtered: number; excluded: number; filters: UniverseFilterOptions; groups: StrategyUniverseGroup[] }> {
   const filters = options.filters ?? DEFAULT_UNIVERSE_FILTERS;
-  const stocks = (await loadKrxStocks()).map(normalizeUniverseStock).filter((stock) => stock.market !== "KONEX");
   const maxQuoteScan = options.maxQuoteScan ?? 600;
-  const quoteTargets = stocks.slice(0, maxQuoteScan);
   const quotes: UniverseQuote[] = [];
+  let source: "rank-api" | "quote-scan" = "quote-scan";
 
-  for (const stock of quoteTargets) {
+  if (options.client.getVolumeRankCandidates) {
     try {
-      if (options.client.getCurrentPriceDetail) {
-        const detail = await options.client.getCurrentPriceDetail(stock.code);
-        quotes.push({ ...stock, ...detail, code: stock.code, name: detail.name || stock.name, market: stock.market });
-      } else {
-        const price = await options.client.getCurrentPrice(stock.code);
-        quotes.push({ ...stock, price: price.currentPrice, volume: price.volume, amount: price.currentPrice * price.volume });
-      }
+      const ranked = await options.client.getVolumeRankCandidates({
+        minPrice: filters.minPrice,
+        minVolume: filters.minVolume,
+        sort: "amount",
+        count: maxQuoteScan,
+      });
+      quotes.push(...ranked.map(rankCandidateToQuote));
+      source = "rank-api";
     } catch {
-      // skip temporarily unavailable symbols; they are not actionable candidates
+      // fall back to direct quote scan if rank API is temporarily unavailable
+    }
+  }
+
+  if (!quotes.length) {
+    const stocks = (await loadKrxStocks()).map(normalizeUniverseStock).filter((stock) => stock.market !== "KONEX");
+    const quoteTargets = stocks.slice(0, maxQuoteScan);
+    for (const stock of quoteTargets) {
+      try {
+        if (options.client.getCurrentPriceDetail) {
+          const detail = await options.client.getCurrentPriceDetail(stock.code);
+          quotes.push({ ...stock, ...detail, code: stock.code, name: detail.name || stock.name, market: stock.market });
+        } else {
+          const price = await options.client.getCurrentPrice(stock.code);
+          quotes.push({ ...stock, price: price.currentPrice, volume: price.volume, amount: price.currentPrice * price.volume });
+        }
+      } catch {
+        // skip temporarily unavailable symbols; they are not actionable candidates
+      }
     }
   }
 
@@ -199,7 +231,8 @@ export async function buildWholeMarketUniverse(options: {
     : TRADING_STRATEGIES;
 
   return {
-    scanned: quoteTargets.length,
+    source,
+    scanned: quotes.length,
     filtered: filtered.length,
     excluded: quotes.length - filtered.length,
     filters,

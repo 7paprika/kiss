@@ -21,11 +21,12 @@ import BacktestPanel from "@/components/BacktestPanel";
 import ScreenerPanel from "@/components/ScreenerPanel";
 import PerformancePanel from "@/components/PerformancePanel";
 import AccountManagerModal from "@/components/AccountManagerModal";
+import AccountBalancePanel from "@/components/AccountBalancePanel";
 import NewsPanel from "@/components/NewsPanel";
 import OptimizerPanel from "@/components/OptimizerPanel";
 import { useRealtimeSignal } from "@/hooks/useRealtime";
 
-type RightTab = "strategy" | "backtest" | "screener" | "performance" | "telegram" | "log" | "news" | "optimizer";
+type RightTab = "account" | "strategy" | "backtest" | "screener" | "performance" | "telegram" | "log" | "news" | "optimizer";
 type MobileTab = "watchlist" | "chart" | "order" | "strategy" | "more";
 
 export default function Dashboard() {
@@ -105,6 +106,7 @@ export default function Dashboard() {
 
   // ─── 우측 탭 정의 ─────────────────────────────────────────────────────────
   const rightTabs = [
+    { id: "account" as RightTab, icon: CreditCard, label: "잔고" },
     { id: "strategy" as RightTab, icon: Zap, label: "전략" },
     { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트" },
     { id: "optimizer" as RightTab, icon: Zap, label: "최적화" },
@@ -217,6 +219,7 @@ export default function Dashboard() {
       </div>
       {/* 탭 콘텐츠 */}
       <div className="flex-1 overflow-hidden">
+        {rightTab === "account" && <AccountBalancePanel />}
         {rightTab === "strategy" && <StrategyPanel />}
         {rightTab === "backtest" && (
           <BacktestPanel
@@ -379,6 +382,7 @@ export default function Dashboard() {
               {/* 더보기 탭 내 서브 탭 */}
               <div className="flex border-b border-border overflow-x-auto scrollbar-none shrink-0">
                 {([
+                  { id: "account", label: "잔고" },
                   { id: "backtest", label: "백테스트" },
                   { id: "optimizer", label: "최적화" },
                   { id: "screener", label: "스크리너" },
@@ -401,6 +405,7 @@ export default function Dashboard() {
                 ))}
               </div>
               <div className="flex-1 overflow-hidden">
+                {rightTab === "account" && <AccountBalancePanel />}
                 {rightTab === "backtest" && (
                   <BacktestPanel
                     selectedStockCode={selectedStock?.code}

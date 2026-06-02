@@ -78,6 +78,35 @@ export interface KisBalance {
   profitLossRate: number;
 }
 
+export interface KisAccountBalance {
+  holdings: KisBalance[];
+  totalEval: number;
+  totalProfit: number;
+  cashBalance: number;
+  withdrawableCash: number;
+  purchasePower: number;
+}
+
+export interface KisRankCandidate {
+  code: string;
+  name: string;
+  market: string;
+  price: number;
+  changeRate: number;
+  volume: number;
+  amount: number;
+  rank?: number;
+}
+
+export interface KisRankCandidateOptions {
+  minPrice?: number;
+  maxPrice?: number;
+  minVolume?: number;
+  sort?: "volume" | "amount" | "turnover" | "change";
+  market?: "KRX" | "NXT" | "ALL";
+  count?: number;
+}
+
 export interface KisOrderResult {
   orderNo: string;
   orderTime: string;
@@ -362,8 +391,67 @@ export class KisApiClient {
       .reverse();
   }
 
+  // 거래량/거래대금 순위 기반 후보 조회
+  async getVolumeRankCandidates(options: KisRankCandidateOptions = {}): Promise<KisRankCandidate[]> {
+    const minPrice = options.minPrice ?? 1000;
+    const maxPrice = options.maxPrice ?? 1000000;
+    const minVolume = options.minVolume ?? 50000;
+    const sortMap: Record<NonNullable<KisRankCandidateOptions["sort"]>, string> = {
+      volume: "0",
+      amount: "3",
+      turnover: "2",
+      change: "1",
+    };
+    const marketMap: Record<NonNullable<KisRankCandidateOptions["market"]>, string> = {
+      KRX: "J",
+      NXT: "NX",
+      ALL: "UN",
+    };
+
+    const data = await this.request<{ output: Array<Record<string, string>> }>(
+      "GET",
+      "/uapi/domestic-stock/v1/quotations/volume-rank",
+      "FHPST01710000",
+      {
+        FID_COND_MRKT_DIV_CODE: marketMap[options.market ?? "KRX"],
+        FID_COND_SCR_DIV_CODE: "20171",
+        FID_INPUT_ISCD: "0000",
+        FID_DIV_CLS_CODE: "1",
+        FID_BLNG_CLS_CODE: sortMap[options.sort ?? "amount"],
+        FID_TRGT_CLS_CODE: "111111111",
+        // 투자위험/경고/주의, 관리종목, 정리매매, 불성실공시, 우선주, 거래정지, ETF, ETN, 신용주문불가, SPAC 제외
+        FID_TRGT_EXLS_CLS_CODE: "1111111111",
+        FID_INPUT_PRICE_1: String(minPrice),
+        FID_INPUT_PRICE_2: String(maxPrice),
+        FID_VOL_CNT: String(minVolume),
+        FID_INPUT_DATE_1: "",
+      }
+    );
+
+    const rows = (data.output || []).map((r, index) => {
+      const code = r.mksc_shrn_iscd || r.stck_shrn_iscd || r.pdno || r.iscd || "";
+      const name = r.hts_kor_isnm || r.prdt_name || r.prdt_abrv_name || code;
+      const price = Number(r.stck_prpr || r.prpr || r.now_pric || 0);
+      const volume = Number(r.acml_vol || r.vol || 0);
+      const amount = Number(r.acml_tr_pbmn || r.tr_pbmn || (price * volume));
+      const changeRate = Number(r.prdy_ctrt || r.flt_rt || r.prdy_vrss_sign_rate || 0);
+      return {
+        code,
+        name,
+        market: options.market === "NXT" ? "NXT" : "KRX",
+        price,
+        changeRate,
+        volume,
+        amount,
+        rank: Number(r.data_rank || r.rank || index + 1),
+      };
+    }).filter((row) => /^\d{6}$/.test(row.code));
+
+    return typeof options.count === "number" ? rows.slice(0, options.count) : rows;
+  }
+
   // 잔고 조회
-  async getBalance(): Promise<{ holdings: KisBalance[]; totalEval: number; totalProfit: number }> {
+  async getBalance(): Promise<KisAccountBalance> {
     const data = await this.request<{
       output1: Array<Record<string, string>>;
       output2: Array<Record<string, string>>;
@@ -400,10 +488,15 @@ export class KisApiClient {
       }));
 
     const summary = data.output2?.[0] || {};
+    const cashBalance = Number(summary.dnca_tot_amt || summary.dnca_tota || summary.cash || 0);
+    const withdrawableCash = Number(summary.nxdy_excc_amt || summary.prvs_rcdl_excc_amt || summary.d2_auto_rdpt_amt || 0);
     return {
       holdings,
       totalEval: Number(summary.tot_evlu_amt || 0),
       totalProfit: Number(summary.evlu_pfls_smtl_amt || 0),
+      cashBalance,
+      withdrawableCash,
+      purchasePower: Number(summary.nass_amt || summary.ord_psbl_cash || withdrawableCash || cashBalance),
     };
   }
 
