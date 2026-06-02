@@ -93,4 +93,15 @@ describe("chart compatibility", () => {
     expect(dashboard).not.toContain("탭 바 - 스크롤 가능");
     expect(dashboard).not.toContain("overflow-x-auto scrollbar-none");
   });
+  it("draws strategy signal markers and pattern overlays on the price chart", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain("createSeriesMarkers");
+    expect(source).toContain("trpc.backtest.getSignalAnnotations.useQuery");
+    expect(source).toContain("strategyMarkersRef");
+    expect(source).toContain("patternSeriesRefs");
+    expect(source).toContain("매매신호");
+    expect(source).toContain("strategy-signal-legend");
+  });
+
 });

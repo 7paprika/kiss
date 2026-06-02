@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   createChart,
+  createSeriesMarkers,
   IChartApi,
   ISeriesApi,
   CandlestickSeries,
@@ -12,6 +13,8 @@ import {
   type CandlestickData,
   type HistogramData,
   type LineData,
+  type SeriesMarker,
+  type ISeriesMarkersPluginApi,
   type Time,
 } from "lightweight-charts";
 import { trpc } from "@/lib/trpc";
@@ -126,6 +129,34 @@ function formatProgramTime(time?: string) {
   return `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`;
 }
 
+function toChartTime(date: string): Time {
+  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}` as Time;
+}
+
+function signalColor(signal: "BUY" | "SELL") {
+  return signal === "BUY" ? "#22c55e" : "#ef4444";
+}
+
+type StrategySignalOverlay = {
+  strategyId: string;
+  strategyName: string;
+  date: string;
+  signal: "BUY" | "SELL";
+  strength: number;
+};
+
+function buildStrategyMarkers(signals: StrategySignalOverlay[]): SeriesMarker<Time>[] {
+  return signals.map((signal) => ({
+    id: `${signal.strategyId}-${signal.date}-${signal.signal}`,
+    time: toChartTime(signal.date),
+    position: signal.signal === "BUY" ? "belowBar" : "aboveBar",
+    shape: signal.signal === "BUY" ? "arrowUp" : "arrowDown",
+    color: signalColor(signal.signal),
+    text: `${signal.signal === "BUY" ? "매수" : "청산"} ${signal.strategyName}`,
+    size: Math.max(1, Math.min(1.8, 0.8 + signal.strength)),
+  }));
+}
+
 export default function TradingChart({ stockCode, stockName }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -143,6 +174,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   const bbSeriesRefs = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const macdSeriesRefs = useRef<Map<string, ISeriesApi<"Line" | "Histogram">>>(new Map());
   const stochSeriesRefs = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const strategyMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const patternSeriesRefs = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
   const [period, setPeriod] = useState<Period>("D");
   const [indicators, setIndicators] = useState<Set<Indicator>>(new Set<Indicator>(["ma", "volume"]));
@@ -163,6 +196,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   const { data: programTrade, isLoading: isProgramTradeLoading, error: programTradeError } = trpc.kis.getProgramTradeByStock.useQuery(
     { stockCode },
     { enabled: isKisActive && !!stockCode, staleTime: 30_000, retry: false }
+  );
+
+  const { data: strategyAnnotations } = trpc.backtest.getSignalAnnotations.useQuery(
+    { stockCode, period },
+    { enabled: isKisActive && !!stockCode, staleTime: 60_000, retry: false }
   );
 
   // Realtime tick: subscribe to live price via Socket.IO
@@ -311,7 +349,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       chart.remove(); volChart.remove();
       chartRef.current = null; volChartRef.current = null;
       candleSeriesRef.current = null; volSeriesRef.current = null;
-      maSeriesRefs.current.clear(); bbSeriesRefs.current.clear();
+      strategyMarkersRef.current = null;
+      maSeriesRefs.current.clear(); bbSeriesRefs.current.clear(); patternSeriesRefs.current.clear();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isKisActive]);
@@ -504,6 +543,38 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     chartRef.current.timeScale().fitContent();
   }, [isKisActive, ohlcv, indicators]);
 
+  useEffect(() => {
+    if (!isKisActive || !chartRef.current || !candleSeriesRef.current) return;
+
+    if (!strategyMarkersRef.current) {
+      strategyMarkersRef.current = createSeriesMarkers(candleSeriesRef.current, []);
+    }
+    strategyMarkersRef.current.setMarkers(buildStrategyMarkers(strategyAnnotations?.signals ?? []));
+
+    patternSeriesRefs.current.forEach((series) => chartRef.current?.removeSeries(series));
+    patternSeriesRefs.current.clear();
+
+    strategyAnnotations?.patterns.forEach((pattern, patternIndex) => {
+      const segments = pattern.kind === "channel" && pattern.points.length >= 4
+        ? [pattern.points.slice(0, 2), pattern.points.slice(2, 4)]
+        : [pattern.points];
+
+      segments.forEach((points, segmentIndex) => {
+        const data: LineData[] = points.map((p) => ({ time: toChartTime(p.date), value: p.value }));
+        const series = chartRef.current!.addSeries(LineSeries, {
+          color: pattern.color,
+          lineWidth: pattern.kind === "zigzag" ? 2 : 1,
+          lineStyle: pattern.kind === "channel" || pattern.kind === "triangle" ? 2 : 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          title: pattern.label,
+        });
+        series.setData(data);
+        patternSeriesRefs.current.set(`${pattern.strategyId}-${patternIndex}-${segmentIndex}`, series);
+      });
+    });
+  }, [isKisActive, strategyAnnotations]);
+
   const last = ohlcv?.[ohlcv.length - 1];
   const prev = ohlcv?.[ohlcv.length - 2];
   const displayData = crosshairData.close ? crosshairData : last ? {
@@ -601,6 +672,16 @@ export default function TradingChart({ stockCode, stockName }: Props) {
               </span>
             );
           })}
+        </div>
+      )}
+
+      {isKisActive && strategyAnnotations && (
+        <div className="strategy-signal-legend flex items-center gap-3 px-3 py-1 text-[10px] border-b border-border/50 bg-card/40">
+          <span className="font-semibold text-foreground">매매신호</span>
+          <span className="text-bull">▲ 매수 {strategyAnnotations.signals.filter((signal) => signal.signal === "BUY").length}</span>
+          <span className="text-bear">▼ 청산 {strategyAnnotations.signals.filter((signal) => signal.signal === "SELL").length}</span>
+          <span className="text-muted-foreground">패턴선 {strategyAnnotations.patterns.length}</span>
+          {strategyAnnotations.signals.length === 0 && <span className="text-muted-foreground">현재 구간 신호 없음</span>}
         </div>
       )}
 

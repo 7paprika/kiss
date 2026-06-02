@@ -13,6 +13,7 @@ import { KisApiClient, setKisClient } from "./kisApi";
 import { getAllStrategyMeta, getTradingStrategy as getTradingStrategyById } from "./strategies/index";
 import { nanoid } from "nanoid";
 import { runBacktest } from "./backtest";
+import { generateStrategyAnnotations } from "./strategyAnnotations";
 import { sendTelegramMessage, testTelegramConnection } from "./telegram";
 import { initKisClientForUser } from "./autoTrader";
 import { fetchStockNewsAndDisclosures } from "./news";
@@ -669,6 +670,16 @@ const backtestRouter = router({
 
   getRecentBatches: protectedProcedure.query(async ({ ctx }) => getRecentBacktestBatches(ctx.user.id)),
   getHistory: protectedProcedure.input(z.object({ batchId: z.string() })).query(async ({ input }) => getBacktestResultsByBatch(input.batchId)),
+  getSignalAnnotations: protectedProcedure.input(z.object({
+    stockCode: z.string().min(1),
+    period: z.enum(["D", "W", "M"]).default("D"),
+    strategyIds: z.array(z.string()).optional(),
+  })).query(async ({ ctx, input }) => {
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    const ohlcv = await client.getOHLCV(input.stockCode, input.period);
+    return generateStrategyAnnotations(ohlcv, { strategyIds: input.strategyIds });
+  }),
 });
 
 // ─── Screener Router ─────────────────────────────────────────────────────────────────────────────────────
