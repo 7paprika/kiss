@@ -250,6 +250,13 @@ const kisRouter = router({
     return client.getBalance();
   }),
 
+  getProgramTradeByStock: protectedProcedure.input(z.object({ stockCode: z.string().regex(/^\d{6}$/) })).query(async ({ ctx, input }) => {
+    if (!checkRateLimit(`program-trade-${ctx.user.id}`, 60, 60_000)) throw new Error("Rate limit exceeded");
+    const client = await initKisClientForUser(ctx.user.id);
+    if (!client) throw new Error("KIS API 연결이 필요합니다");
+    return client.getProgramTradeByStock(input.stockCode);
+  }),
+
   placeOrder: protectedProcedure.input(z.object({
     stockCode: z.string(),
     stockName: z.string().optional(),

@@ -107,6 +107,21 @@ export interface KisRankCandidateOptions {
   count?: number;
 }
 
+export interface KisProgramTradeByStock {
+  stockCode: string;
+  time: string;
+  currentPrice: number;
+  totalVolume: number;
+  sellVolume: number;
+  buyVolume: number;
+  netBuyVolume: number;
+  sellAmount: number;
+  buyAmount: number;
+  netBuyAmount: number;
+  netBuyVolumeChange: number;
+  netBuyAmountChange: number;
+}
+
 export interface KisOrderResult {
   orderNo: string;
   orderTime: string;
@@ -475,6 +490,33 @@ export class KisApiClient {
     }).filter((row) => /^\d{6}$/.test(row.code));
 
     return typeof options.count === "number" ? rows.slice(0, options.count) : rows;
+  }
+
+  // 종목별 프로그램매매 추이(체결) 조회
+  async getProgramTradeByStock(stockCode: string): Promise<KisProgramTradeByStock> {
+    const data = await this.request<{ output: Array<Record<string, string>> | Record<string, string> }>(
+      "GET",
+      "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
+      "FHPPG04650101",
+      { FID_COND_MRKT_DIV_CODE: "J", FID_INPUT_ISCD: stockCode }
+    );
+
+    const output = Array.isArray(data.output) ? data.output[0] : data.output;
+    const row = output || {};
+    return {
+      stockCode,
+      time: row.bsop_hour || row.stck_cntg_hour || row.trd_hour || "",
+      currentPrice: Number(row.stck_prpr || row.prpr || 0),
+      totalVolume: Number(row.acml_vol || row.totl_vol || 0),
+      sellVolume: Number(row.whol_smtn_seln_vol || row.seln_cnqn || row.seln_vol || 0),
+      buyVolume: Number(row.whol_smtn_shnu_vol || row.shnu_cnqn || row.shnu_vol || 0),
+      netBuyVolume: Number(row.whol_smtn_ntby_qty || row.ntby_cnqn || row.ntby_qty || 0),
+      sellAmount: Number(row.whol_smtn_seln_tr_pbmn || row.seln_tr_pbmn || 0),
+      buyAmount: Number(row.whol_smtn_shnu_tr_pbmn || row.shnu_tr_pbmn || 0),
+      netBuyAmount: Number(row.whol_smtn_ntby_tr_pbmn || row.ntby_tr_pbmn || 0),
+      netBuyVolumeChange: Number(row.whol_ntby_vol_icdc || row.ntby_vol_icdc || 0),
+      netBuyAmountChange: Number(row.whol_ntby_tr_pbmn_icdc || row.ntby_tr_pbmn_icdc || 0),
+    };
   }
 
   // 잔고 조회

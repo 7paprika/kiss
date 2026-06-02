@@ -112,6 +112,20 @@ function formatVolume(value?: number) {
   return value.toLocaleString("ko-KR");
 }
 
+function formatAmount(value?: number) {
+  if (!value) return "--";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 100_000_000) return `${sign}${(abs / 100_000_000).toFixed(1)}억`;
+  if (abs >= 10_000) return `${sign}${(abs / 10_000).toFixed(0)}만`;
+  return value.toLocaleString("ko-KR");
+}
+
+function formatProgramTime(time?: string) {
+  if (!time || time.length < 6) return "--";
+  return `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`;
+}
+
 export default function TradingChart({ stockCode, stockName }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -144,6 +158,11 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   const { data: ohlcv, isLoading, error: ohlcvError } = trpc.kis.getOHLCV.useQuery(
     { stockCode, period },
     { enabled: !!stockCode && Boolean(kisSettings?.isActive), staleTime: 60_000, retry: false }
+  );
+
+  const { data: programTrade, isLoading: isProgramTradeLoading, error: programTradeError } = trpc.kis.getProgramTradeByStock.useQuery(
+    { stockCode },
+    { enabled: isKisActive && !!stockCode, staleTime: 30_000, retry: false }
   );
 
   // Realtime tick: subscribe to live price via Socket.IO
@@ -582,6 +601,47 @@ export default function TradingChart({ stockCode, stockName }: Props) {
               </span>
             );
           })}
+        </div>
+      )}
+
+      {/* Program Trading Card */}
+      {isKisActive && (
+        <div className="border-b border-border/50 bg-secondary/20 px-3 py-2">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-2">
+              <Activity size={13} className="text-blue-400" />
+              <span className="text-xs font-semibold">프로그램 매매</span>
+              <span className="text-[10px] text-muted-foreground">{formatProgramTime(programTrade?.time)}</span>
+            </div>
+            {isProgramTradeLoading && <span className="text-[10px] text-muted-foreground">조회 중...</span>}
+            {programTradeError && <span className="text-[10px] text-red-400">조회 실패</span>}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+            <div className="rounded bg-card/60 border border-border/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">프로그램 매수</div>
+              <div className="font-mono text-bull">{formatVolume(programTrade?.buyVolume)}</div>
+              <div className="font-mono text-[10px] text-muted-foreground">{formatAmount(programTrade?.buyAmount)}</div>
+            </div>
+            <div className="rounded bg-card/60 border border-border/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">프로그램 매도</div>
+              <div className="font-mono text-bear">{formatVolume(programTrade?.sellVolume)}</div>
+              <div className="font-mono text-[10px] text-muted-foreground">{formatAmount(programTrade?.sellAmount)}</div>
+            </div>
+            <div className="rounded bg-card/60 border border-border/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">프로그램 순매수</div>
+              <div className={`font-mono ${programTrade && programTrade.netBuyVolume >= 0 ? "text-bull" : "text-bear"}`}>
+                {formatVolume(programTrade?.netBuyVolume)}
+              </div>
+              <div className="font-mono text-[10px] text-muted-foreground">{formatAmount(programTrade?.netBuyAmount)}</div>
+            </div>
+            <div className="rounded bg-card/60 border border-border/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">순매수 증감</div>
+              <div className={`font-mono ${programTrade && programTrade.netBuyVolumeChange >= 0 ? "text-bull" : "text-bear"}`}>
+                {formatVolume(programTrade?.netBuyVolumeChange)}
+              </div>
+              <div className="font-mono text-[10px] text-muted-foreground">{formatAmount(programTrade?.netBuyAmountChange)}</div>
+            </div>
+          </div>
         </div>
       )}
 
