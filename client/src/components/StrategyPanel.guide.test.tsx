@@ -19,6 +19,9 @@ const strategyIds = [
   "macd_trading",
   "stochastic_selection",
   "stochastic_trading",
+  "abc_trading",
+  "fractal_trading",
+  "channel_trading",
   "triangle_reversion_trading",
 ];
 

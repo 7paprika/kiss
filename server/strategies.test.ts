@@ -25,18 +25,18 @@ function mockCandidates(count: number, trend: "up" | "down" | "flat" = "flat") {
 }
 
 describe("Strategy Engine", () => {
-  it("getAllStrategyMeta returns at least 15 strategies (7 selection + 8 trading)", () => {
+  it("getAllStrategyMeta returns at least 18 strategies (7 selection + 11 trading)", () => {
     const metas = getAllStrategyMeta();
-    // 7 selection + 8 trading (includes triangle reversion trading)
-    expect(metas.length).toBeGreaterThanOrEqual(15);
+    // 7 selection + 11 trading (includes ABC, fractal, channel, triangle reversion trading)
+    expect(metas.length).toBeGreaterThanOrEqual(18);
   });
 
-  it("has at least 7 selection strategies and at least 8 trading strategies", () => {
+  it("has at least 7 selection strategies and at least 11 trading strategies", () => {
     const metas = getAllStrategyMeta();
     const selection = metas.filter((m) => m.type === "selection");
     const trading = metas.filter((m) => m.type === "trading");
     expect(selection.length).toBeGreaterThanOrEqual(7);
-    expect(trading.length).toBeGreaterThanOrEqual(8);
+    expect(trading.length).toBeGreaterThanOrEqual(11);
   });
 
   it("each strategy has required fields", () => {
@@ -157,6 +157,72 @@ describe("Strategy Engine", () => {
     const result = strategy.evaluate(data, strategy.meta.defaultParams);
     expect(result.signal).toMatch(/^(BUY|SELL|HOLD)$/);
     expect(typeof result.strength).toBe("number");
+  });
+
+
+
+  it("trading strategy: abc_trading buys when C forms a higher low and price breaks above B", () => {
+    const strategy = getTradingStrategy("abc_trading");
+    expect(strategy).toBeDefined();
+    if (!strategy) return;
+
+    const data = [
+      ...mockOHLCV(20, 50_000, "flat"),
+      { date: "20240321", open: 50_000, high: 51_000, low: 45_000, close: 46_000, volume: 1_000_000, amount: 46_000_000_000 },
+      { date: "20240322", open: 46_000, high: 56_000, low: 45_500, close: 55_000, volume: 1_200_000, amount: 66_000_000_000 },
+      { date: "20240323", open: 55_000, high: 55_500, low: 49_000, close: 50_500, volume: 900_000, amount: 45_450_000_000 },
+      { date: "20240324", open: 50_500, high: 58_000, low: 50_000, close: 57_000, volume: 1_500_000, amount: 85_500_000_000 },
+    ];
+
+    const result = strategy.evaluate(data, strategy.meta.defaultParams);
+    expect(result.signal).toBe("BUY");
+    expect(result.reason).toContain("ABC 상승 돌파");
+    expect(result.indicators?.bPoint).toBe(56_000);
+  });
+
+  it("trading strategy: fractal_trading buys when price breaks a confirmed fractal high", () => {
+    const strategy = getTradingStrategy("fractal_trading");
+    expect(strategy).toBeDefined();
+    if (!strategy) return;
+
+    const data = [
+      ...mockOHLCV(20, 50_000, "flat"),
+      { date: "20240421", open: 50_000, high: 52_000, low: 49_000, close: 50_000, volume: 1_000_000, amount: 50_000_000_000 },
+      { date: "20240422", open: 50_000, high: 55_000, low: 49_500, close: 53_000, volume: 1_000_000, amount: 53_000_000_000 },
+      { date: "20240423", open: 53_000, high: 60_000, low: 52_000, close: 58_000, volume: 1_000_000, amount: 58_000_000_000 },
+      { date: "20240424", open: 58_000, high: 56_000, low: 51_000, close: 53_000, volume: 1_000_000, amount: 53_000_000_000 },
+      { date: "20240425", open: 53_000, high: 54_000, low: 50_000, close: 52_000, volume: 1_000_000, amount: 52_000_000_000 },
+      { date: "20240426", open: 52_000, high: 62_000, low: 51_000, close: 61_000, volume: 1_400_000, amount: 85_400_000_000 },
+    ];
+
+    const result = strategy.evaluate(data, strategy.meta.defaultParams);
+    expect(result.signal).toBe("BUY");
+    expect(result.reason).toContain("상단 프랙탈 돌파");
+    expect(result.indicators?.fractalHigh).toBe(60_000);
+  });
+
+  it("trading strategy: channel_trading buys on a Donchian channel upper breakout", () => {
+    const strategy = getTradingStrategy("channel_trading");
+    expect(strategy).toBeDefined();
+    if (!strategy) return;
+
+    const data = [
+      ...Array.from({ length: 20 }, (_, i) => ({
+        date: `202405${String(i + 1).padStart(2, "0")}`,
+        open: 50_000 + i * 100,
+        high: 52_000 + i * 100,
+        low: 48_000 + i * 100,
+        close: 50_000 + i * 100,
+        volume: 1_000_000,
+        amount: (50_000 + i * 100) * 1_000_000,
+      })),
+      { date: "20240521", open: 52_000, high: 56_000, low: 51_000, close: 55_500, volume: 1_500_000, amount: 83_250_000_000 },
+    ];
+
+    const result = strategy.evaluate(data, strategy.meta.defaultParams);
+    expect(result.signal).toBe("BUY");
+    expect(result.reason).toContain("채널 상단 돌파");
+    expect(result.indicators?.upperChannel).toBe(53_900);
   });
 
   it("trading strategy: triangle_reversion_trading buys when downside breakout returns to triangle midpoint", () => {

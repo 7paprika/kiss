@@ -766,6 +766,198 @@ export const stochasticTradingStrategy: ITradingStrategy = {
   },
 };
 
+
+// ─── Strategy 8: ABC / Fractal / Channel Trading ─────────────────────────────
+// Trading: price-action strategies commonly used for short-term Korean equity
+// execution. SELL remains a long-only exit signal, not a short entry.
+
+export const abcTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "abc_trading",
+    name: "ABC 매매",
+    description: "A 저점-B 반등-C 눌림 구조에서 C가 A보다 높은 저점을 만들고 B 고점을 돌파하면 매수하는 가격 행동 전략입니다.",
+    type: "trading",
+    defaultParams: { breakoutPct: 0.005, minPullbackPct: 0.03, stopBufferPct: 0.005 },
+    paramSchema: [
+      { key: "breakoutPct", label: "B 돌파 확인 비율", type: "number", min: 0.001, max: 0.05, step: 0.001 },
+      { key: "minPullbackPct", label: "최소 눌림 비율", type: "number", min: 0.01, max: 0.2, step: 0.005 },
+      { key: "stopBufferPct", label: "C 저점 손절 버퍼", type: "number", min: 0.001, max: 0.03, step: 0.001 },
+    ],
+    reference: "ABC price-action breakout continuation pattern",
+  },
+  evaluate(ohlcv, params) {
+    const breakoutPct = Number(params.breakoutPct) || 0.005;
+    const minPullbackPct = Number(params.minPullbackPct) || 0.03;
+    const stopBufferPct = Number(params.stopBufferPct) || 0.005;
+    if (ohlcv.length < 4) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const aBar = ohlcv[ohlcv.length - 4];
+    const bBar = ohlcv[ohlcv.length - 3];
+    const cBar = ohlcv[ohlcv.length - 2];
+    const curr = ohlcv[ohlcv.length - 1];
+    const aPoint = aBar.low;
+    const bPoint = bBar.high;
+    const cPoint = cBar.low;
+    const pullbackPct = bPoint > 0 ? (bPoint - cPoint) / bPoint : 0;
+    const higherLow = cPoint > aPoint;
+    const validPullback = pullbackPct >= minPullbackPct;
+    const brokeB = curr.close >= bPoint * (1 + breakoutPct);
+    const failedC = curr.close <= cPoint * (1 - breakoutPct);
+
+    if (higherLow && validPullback && brokeB) {
+      const stopLoss = cPoint * (1 - stopBufferPct);
+      const structureScore = Math.max(0, Math.min(1, (cPoint - aPoint) / Math.max(1, bPoint - aPoint)));
+      const breakoutScore = Math.max(0, Math.min(1, (curr.close / bPoint - 1) / Math.max(breakoutPct, 0.001)));
+      return {
+        signal: "BUY",
+        strength: Math.min(0.95, 0.58 + structureScore * 0.2 + breakoutScore * 0.17),
+        reason: `ABC 상승 돌파 (B: ${bPoint.toFixed(0)}, C 손절 기준: ${stopLoss.toFixed(0)})`,
+        indicators: { aPoint, bPoint, cPoint, pullbackPct, stopLoss } as Record<string, number>,
+      };
+    }
+
+    if (higherLow && validPullback && failedC) {
+      return {
+        signal: "SELL",
+        strength: 0.65,
+        reason: `ABC 패턴 실패, C 저점 이탈 (C: ${cPoint.toFixed(0)})`,
+        indicators: { aPoint, bPoint, cPoint, pullbackPct } as Record<string, number>,
+      };
+    }
+
+    return {
+      signal: "HOLD",
+      strength: 0.25,
+      reason: higherLow ? "ABC 구조 형성 중, B 돌파 대기" : "ABC 높은 저점 미확인",
+      indicators: { aPoint, bPoint, cPoint, pullbackPct } as Record<string, number>,
+    };
+  },
+};
+
+function findLatestFractal(ohlcv: KisOHLCV[], kind: "high" | "low", leftRight: number, endExclusive: number): { index: number; value: number } | undefined {
+  for (let i = endExclusive - leftRight - 1; i >= leftRight; i--) {
+    const center = kind === "high" ? ohlcv[i].high : ohlcv[i].low;
+    let ok = true;
+    for (let j = i - leftRight; j <= i + leftRight; j++) {
+      if (j === i) continue;
+      const other = kind === "high" ? ohlcv[j].high : ohlcv[j].low;
+      if (kind === "high" ? center <= other : center >= other) { ok = false; break; }
+    }
+    if (ok) return { index: i, value: center };
+  }
+  return undefined;
+}
+
+export const fractalTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "fractal_trading",
+    name: "프랙탈 매매",
+    description: "좌우 봉으로 확인된 프랙탈 고점/저점을 기준으로 돌파는 진입, 저점 이탈은 청산 신호로 쓰는 가격 행동 전략입니다.",
+    type: "trading",
+    defaultParams: { leftRightBars: 2, breakoutPct: 0.005, stopBufferPct: 0.005 },
+    paramSchema: [
+      { key: "leftRightBars", label: "프랙탈 좌우 봉 수", type: "number", min: 1, max: 5, step: 1 },
+      { key: "breakoutPct", label: "돌파 확인 비율", type: "number", min: 0.001, max: 0.05, step: 0.001 },
+      { key: "stopBufferPct", label: "저점 손절 버퍼", type: "number", min: 0.001, max: 0.03, step: 0.001 },
+    ],
+    reference: "Bill Williams-style fractal breakout rule",
+  },
+  evaluate(ohlcv, params) {
+    const leftRightBars = Math.max(1, Math.floor(Number(params.leftRightBars) || 2));
+    const breakoutPct = Number(params.breakoutPct) || 0.005;
+    const stopBufferPct = Number(params.stopBufferPct) || 0.005;
+    if (ohlcv.length < leftRightBars * 2 + 2) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const curr = ohlcv[ohlcv.length - 1];
+    const fractalHigh = findLatestFractal(ohlcv, "high", leftRightBars, ohlcv.length - 1);
+    const fractalLow = findLatestFractal(ohlcv, "low", leftRightBars, ohlcv.length - 1);
+    const highValue = fractalHigh?.value ?? NaN;
+    const lowValue = fractalLow?.value ?? NaN;
+
+    if (fractalHigh && curr.close >= highValue * (1 + breakoutPct)) {
+      const stopLoss = (fractalLow?.value ?? curr.low) * (1 - stopBufferPct);
+      return {
+        signal: "BUY",
+        strength: Math.min(0.95, 0.62 + Math.min(0.33, (curr.close / highValue - 1) * 10)),
+        reason: `상단 프랙탈 돌파 (프랙탈 고점: ${highValue.toFixed(0)}, 손절 기준: ${stopLoss.toFixed(0)})`,
+        indicators: { fractalHigh: highValue, fractalLow: lowValue, stopLoss, fractalHighIndex: fractalHigh.index } as Record<string, number>,
+      };
+    }
+
+    if (fractalLow && curr.close <= lowValue * (1 - breakoutPct)) {
+      return {
+        signal: "SELL",
+        strength: 0.7,
+        reason: `하단 프랙탈 이탈 (프랙탈 저점: ${lowValue.toFixed(0)})`,
+        indicators: { fractalHigh: highValue, fractalLow: lowValue, fractalLowIndex: fractalLow.index } as Record<string, number>,
+      };
+    }
+
+    return {
+      signal: "HOLD",
+      strength: 0.25,
+      reason: "프랙탈 돌파 대기",
+      indicators: { fractalHigh: highValue, fractalLow: lowValue } as Record<string, number>,
+    };
+  },
+};
+
+export const channelTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "channel_trading",
+    name: "채널 매매",
+    description: "이전 구간의 돈치안 채널 상단 돌파를 매수, 하단 이탈을 보유분 청산으로 보는 돌파형 채널 전략입니다.",
+    type: "trading",
+    defaultParams: { channelBars: 20, breakoutPct: 0.005, stopBufferPct: 0.005 },
+    paramSchema: [
+      { key: "channelBars", label: "채널 확인 봉 수", type: "number", min: 10, max: 60, step: 1 },
+      { key: "breakoutPct", label: "돌파 확인 비율", type: "number", min: 0.001, max: 0.05, step: 0.001 },
+      { key: "stopBufferPct", label: "채널 손절 버퍼", type: "number", min: 0.001, max: 0.03, step: 0.001 },
+    ],
+    reference: "Donchian channel breakout trading rule",
+  },
+  evaluate(ohlcv, params) {
+    const channelBars = Number(params.channelBars) || 20;
+    const breakoutPct = Number(params.breakoutPct) || 0.005;
+    const stopBufferPct = Number(params.stopBufferPct) || 0.005;
+    if (ohlcv.length < channelBars + 1) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const channel = ohlcv.slice(-(channelBars + 1), -1);
+    const curr = ohlcv[ohlcv.length - 1];
+    const upperChannel = Math.max(...channel.map(d => d.high));
+    const lowerChannel = Math.min(...channel.map(d => d.low));
+    const channelWidthPct = curr.close > 0 ? (upperChannel - lowerChannel) / curr.close : 0;
+    const brokeUp = curr.close >= upperChannel * (1 + breakoutPct);
+    const brokeDown = curr.close <= lowerChannel * (1 - breakoutPct);
+
+    if (brokeUp) {
+      const stopLoss = lowerChannel * (1 - stopBufferPct);
+      return {
+        signal: "BUY",
+        strength: Math.min(0.95, 0.6 + Math.min(0.35, (curr.close / upperChannel - 1) * 8)),
+        reason: `채널 상단 돌파 (상단: ${upperChannel.toFixed(0)}, 손절 기준: ${stopLoss.toFixed(0)})`,
+        indicators: { upperChannel, lowerChannel, channelWidthPct, stopLoss } as Record<string, number>,
+      };
+    }
+
+    if (brokeDown) {
+      return {
+        signal: "SELL",
+        strength: 0.7,
+        reason: `채널 하단 이탈 (하단: ${lowerChannel.toFixed(0)})`,
+        indicators: { upperChannel, lowerChannel, channelWidthPct } as Record<string, number>,
+      };
+    }
+
+    return {
+      signal: "HOLD",
+      strength: 0.25,
+      reason: "채널 내부, 돌파 대기",
+      indicators: { upperChannel, lowerChannel, channelWidthPct } as Record<string, number>,
+    };
+  },
+};
+
 // ─── Strategy 8: Triangle Convergence Midpoint Reversion (삼수 매매) ─────────────
 // Trading: When a clear contracting triangle breaks out and then returns to the
 // triangle midpoint, trade the counter-move with tight invalidation.
@@ -901,6 +1093,9 @@ export const TRADING_STRATEGIES: ITradingStrategy[] = [
   weekHigh52TradingStrategy,
   macdTradingStrategy,
   stochasticTradingStrategy,
+  abcTradingStrategy,
+  fractalTradingStrategy,
+  channelTradingStrategy,
   triangleReversionTradingStrategy,
 ];
 
