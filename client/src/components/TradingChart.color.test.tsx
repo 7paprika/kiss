@@ -80,4 +80,17 @@ describe("chart compatibility", () => {
     expect(source).toContain("거래량");
     expect(source).toContain("formatVolume(displayData.volume)");
   });
+
+  it("uses a grouped right-panel selector instead of a cramped horizontal tab scroller", () => {
+    const dashboard = readFileSync(resolve(process.cwd(), "client/src/pages/Dashboard.tsx"), "utf8");
+
+    expect(dashboard).toContain("right-panel-selector");
+    expect(dashboard).toContain("right-panel-tab-grid");
+    expect(dashboard).toContain("계좌·전략");
+    expect(dashboard).toContain("분석");
+    expect(dashboard).toContain("운영");
+    expect(dashboard).toContain("패널 선택");
+    expect(dashboard).not.toContain("탭 바 - 스크롤 가능");
+    expect(dashboard).not.toContain("overflow-x-auto scrollbar-none");
+  });
 });

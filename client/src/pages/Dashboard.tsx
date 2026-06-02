@@ -106,16 +106,18 @@ export default function Dashboard() {
 
   // ─── 우측 탭 정의 ─────────────────────────────────────────────────────────
   const rightTabs = [
-    { id: "account" as RightTab, icon: CreditCard, label: "잔고" },
-    { id: "strategy" as RightTab, icon: Zap, label: "전략" },
-    { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트" },
-    { id: "optimizer" as RightTab, icon: Zap, label: "최적화" },
-    { id: "screener" as RightTab, icon: Activity, label: "스크리너" },
-    { id: "performance" as RightTab, icon: TrendingUp, label: "성과" },
-    { id: "news" as RightTab, icon: Newspaper, label: "뉴스" },
-    { id: "telegram" as RightTab, icon: MessageSquare, label: "알림" },
-    { id: "log" as RightTab, icon: FileText, label: "로그" },
+    { id: "account" as RightTab, icon: CreditCard, label: "잔고", group: "계좌·전략" },
+    { id: "strategy" as RightTab, icon: Zap, label: "전략", group: "계좌·전략" },
+    { id: "backtest" as RightTab, icon: BarChart2, label: "백테스트", group: "분석" },
+    { id: "optimizer" as RightTab, icon: Zap, label: "최적화", group: "분석" },
+    { id: "screener" as RightTab, icon: Activity, label: "스크리너", group: "분석" },
+    { id: "performance" as RightTab, icon: TrendingUp, label: "성과", group: "분석" },
+    { id: "news" as RightTab, icon: Newspaper, label: "뉴스", group: "운영" },
+    { id: "telegram" as RightTab, icon: MessageSquare, label: "알림", group: "운영" },
+    { id: "log" as RightTab, icon: FileText, label: "로그", group: "운영" },
   ] as const;
+  const rightTabGroups = ["계좌·전략", "분석", "운영"] as const;
+  const activeRightTab = rightTabs.find((tab) => tab.id === rightTab) ?? rightTabs[0];
 
   // ─── 모바일 탭 정의 ────────────────────────────────────────────────────────
   const mobileTabs = [
@@ -200,22 +202,49 @@ export default function Dashboard() {
   // ─── 우측 패널 콘텐츠 ──────────────────────────────────────────────────────
   const rightPanelContent = (
     <div className="flex flex-col h-full">
-      {/* 탭 바 - 스크롤 가능 */}
-      <div className="flex border-b border-border shrink-0 overflow-x-auto scrollbar-none">
-        {rightTabs.map(({ id, icon: Icon, label }) => (
-          <button
-            key={id}
-            onClick={() => setRightTab(id)}
-            className={`flex-shrink-0 flex items-center justify-center gap-1 px-2 py-2 text-[10px] transition-colors ${
-              rightTab === id
-                ? "text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Icon size={10} />
-            {label}
-          </button>
-        ))}
+      {/* 그룹형 패널 선택 */}
+      <div className="right-panel-selector border-b border-border bg-card/95 shrink-0 px-3 py-2 space-y-2">
+        <label className="flex items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground" htmlFor="right-panel-select">
+          <span>패널 선택</span>
+          <span className="text-primary">{activeRightTab.group} · {activeRightTab.label}</span>
+        </label>
+        <select
+          id="right-panel-select"
+          value={rightTab}
+          onChange={(event) => setRightTab(event.target.value as RightTab)}
+          className="w-full h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+        >
+          {rightTabGroups.map((group) => (
+            <optgroup key={group} label={group}>
+              {rightTabs.filter((tab) => tab.group === group).map(({ id, label }) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <div className="right-panel-tab-grid grid grid-cols-3 gap-1" role="navigation" aria-label="오른쪽 패널 빠른 선택">
+          {rightTabGroups.map((group) => (
+            <div key={group} className="contents">
+              {rightTabs.filter((tab) => tab.group === group).map(({ id, icon: Icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setRightTab(id)}
+                  className={`min-h-8 rounded-md border px-1.5 text-[10px] transition-colors flex items-center justify-center gap-1 ${
+                    rightTab === id
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/60 bg-secondary/40 text-muted-foreground hover:text-foreground hover:bg-secondary"
+                  }`}
+                  title={`${group} · ${label}`}
+                  aria-pressed={rightTab === id}
+                >
+                  <Icon size={11} />
+                  <span className="truncate">{label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
       {/* 탭 콘텐츠 */}
       <div className="flex-1 overflow-hidden">
@@ -379,30 +408,45 @@ export default function Dashboard() {
 
           {mobileTab === "more" && (
             <div className="h-full flex flex-col">
-              {/* 더보기 탭 내 서브 탭 */}
-              <div className="flex border-b border-border overflow-x-auto scrollbar-none shrink-0">
-                {([
-                  { id: "account", label: "잔고" },
-                  { id: "backtest", label: "백테스트" },
-                  { id: "optimizer", label: "최적화" },
-                  { id: "screener", label: "스크리너" },
-                  { id: "performance", label: "성과" },
-                  { id: "news", label: "뉴스" },
-                  { id: "telegram", label: "알림" },
-                  { id: "log", label: "로그" },
-                ] as const).map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => setRightTab(id)}
-                    className={`flex-shrink-0 px-3 py-2 text-xs transition-colors ${
-                      rightTab === id
-                        ? "text-primary border-b-2 border-primary"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              {/* 더보기 패널 선택 */}
+              <div className="right-panel-selector border-b border-border bg-card/95 shrink-0 px-3 py-2 space-y-2">
+                <label className="flex items-center justify-between gap-2 text-[10px] font-medium text-muted-foreground" htmlFor="mobile-right-panel-select">
+                  <span>패널 선택</span>
+                  <span className="text-primary">{activeRightTab.group} · {activeRightTab.label}</span>
+                </label>
+                <select
+                  id="mobile-right-panel-select"
+                  value={rightTab === "strategy" ? "account" : rightTab}
+                  onChange={(event) => setRightTab(event.target.value as RightTab)}
+                  className="w-full h-9 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+                >
+                  {rightTabGroups.map((group) => (
+                    <optgroup key={group} label={group}>
+                      {rightTabs.filter((tab) => tab.id !== "strategy" && tab.group === group).map(({ id, label }) => (
+                        <option key={id} value={id}>{label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <div className="right-panel-tab-grid grid grid-cols-4 gap-1" role="navigation" aria-label="모바일 더보기 패널 빠른 선택">
+                  {rightTabs.filter((tab) => tab.id !== "strategy").map(({ id, icon: Icon, label, group }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setRightTab(id)}
+                      className={`min-h-8 rounded-md border px-1 text-[10px] transition-colors flex items-center justify-center gap-1 ${
+                        rightTab === id
+                          ? "border-primary/60 bg-primary/15 text-primary"
+                          : "border-border/60 bg-secondary/40 text-muted-foreground hover:text-foreground hover:bg-secondary"
+                      }`}
+                      title={`${group} · ${label}`}
+                      aria-pressed={rightTab === id}
+                    >
+                      <Icon size={11} />
+                      <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex-1 overflow-hidden">
                 {rightTab === "account" && <AccountBalancePanel />}
