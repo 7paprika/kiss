@@ -150,47 +150,55 @@ export interface KisOrderbook {
   timestamp: number;
 }
 
-// Rate limiter: KIS API allows ~20 requests/second
-class RateLimiter {
-  private queue: Array<() => void> = [];
-  private running = 0;
-  private readonly maxConcurrent: number;
-  private readonly intervalMs: number;
+const KIS_RATE_LIMIT_CODE = "EGW00201";
 
-  constructor(maxConcurrent = 15, intervalMs = 1000) {
-    this.maxConcurrent = maxConcurrent;
-    this.intervalMs = intervalMs;
-  }
+export function sanitizeKisApiError(error: unknown): Error {
+  const anyError = error as any;
+  const response = anyError?.response;
+  const data = response?.data || {};
+  const msgCd = data.msg_cd || data.message || data.code || anyError?.code;
+  const msg = data.msg1 || data.msg || anyError?.message || "KIS API request failed";
+  const status = response?.status;
+  const method = anyError?.config?.method?.toUpperCase?.();
+  const url = anyError?.config?.url || anyError?.config?.baseURL || "";
+  const safeParts = [
+    "KIS API Error",
+    msgCd ? `[${msgCd}]` : "",
+    status ? `(HTTP ${status})` : "",
+    method ? method : "",
+    typeof url === "string" ? url.split("?")[0] : "",
+    msg ? `: ${msg}` : "",
+  ].filter(Boolean);
+  const sanitized = new Error(safeParts.join(" ").replace(/\s+:/, ":"));
+  sanitized.name = "KisApiError";
+  if (msgCd) (sanitized as any).code = msgCd;
+  if (status) (sanitized as any).status = status;
+  return sanitized;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Conservative token-bucket limiter. KIS may reject bursts even below the documented ceiling,
+// especially when realtime polling and batch screeners run together.
+class RateLimiter {
+  private chain: Promise<void> = Promise.resolve();
+
+  constructor(private readonly minSpacingMs = 180) {}
 
   async acquire(): Promise<void> {
-    if (this.running < this.maxConcurrent) {
-      this.running++;
-      setTimeout(() => {
-        this.running--;
-        if (this.queue.length > 0) {
-          const next = this.queue.shift();
-          next?.();
-        }
-      }, this.intervalMs);
-      return;
-    }
-    return new Promise((resolve) => {
-      this.queue.push(() => {
-        this.running++;
-        setTimeout(() => {
-          this.running--;
-          if (this.queue.length > 0) {
-            const next = this.queue.shift();
-            next?.();
-          }
-        }, this.intervalMs);
-        resolve();
-      });
+    const previous = this.chain;
+    let release!: () => void;
+    this.chain = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    await previous;
+    setTimeout(release, this.minSpacingMs);
   }
 }
 
-const rateLimiter = new RateLimiter(15, 1000);
+const rateLimiter = new RateLimiter(180);
 
 export class KisApiClient {
   private credentials: KisCredentials;
@@ -227,7 +235,9 @@ export class KisApiClient {
         appsecret: this.credentials.appSecret,
       },
       { headers: { "Content-Type": "application/json; charset=utf-8" } }
-    );
+    ).catch((error) => {
+      throw sanitizeKisApiError(error);
+    });
     return res.data as KisTokenResponse;
   }
 
@@ -257,7 +267,9 @@ export class KisApiClient {
         secretkey: this.credentials.appSecret,
       },
       { headers: { "Content-Type": "application/json; charset=utf-8" } }
-    );
+    ).catch((error) => {
+      throw sanitizeKisApiError(error);
+    });
     return res.data.approval_key;
   }
 
@@ -268,29 +280,44 @@ export class KisApiClient {
     params?: Record<string, string>,
     body?: Record<string, unknown>
   ): Promise<T> {
-    await rateLimiter.acquire();
-    await this.ensureAccessToken();
-    const headers: Record<string, string> = {
-      authorization: `Bearer ${this.accessToken}`,
-      appkey: this.credentials.appKey,
-      appsecret: this.credentials.appSecret,
-      tr_id: trId,
-      custtype: "P",
+    const requestOnce = async () => {
+      await rateLimiter.acquire();
+      await this.ensureAccessToken();
+      const headers: Record<string, string> = {
+        authorization: `Bearer ${this.accessToken}`,
+        appkey: this.credentials.appKey,
+        appsecret: this.credentials.appSecret,
+        tr_id: trId,
+        custtype: "P",
+      };
+
+      const res = method === "GET"
+        ? await this.client.get(path, { headers, params, validateStatus: () => true })
+        : await this.client.post(path, body, { headers, validateStatus: () => true });
+
+      if (res.status >= 400 || (res.data?.rt_cd && res.data.rt_cd !== "0")) {
+        throw sanitizeKisApiError({
+          response: { status: res.status, data: res.data },
+          config: { method, url: path },
+        });
+      }
+      return res.data as T;
     };
 
-    const config =
-      method === "GET"
-        ? { headers, params }
-        : { headers, data: body };
-
-    const res = method === "GET"
-      ? await this.client.get(path, { headers, params })
-      : await this.client.post(path, body, { headers });
-
-    if (res.data.rt_cd && res.data.rt_cd !== "0") {
-      throw new Error(`KIS API Error [${res.data.msg_cd}]: ${res.data.msg1}`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await requestOnce();
+      } catch (error) {
+        const safeError = sanitizeKisApiError(error);
+        if ((safeError as any).code === KIS_RATE_LIMIT_CODE && attempt < 2) {
+          await sleep(600 * (attempt + 1));
+          continue;
+        }
+        throw safeError;
+      }
     }
-    return res.data as T;
+
+    throw new Error("KIS API Error: retry exhausted");
   }
 
   // 주식 현재가 시세 조회
