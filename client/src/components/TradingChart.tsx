@@ -21,8 +21,19 @@ import { trpc } from "@/lib/trpc";
 import { useRealtimeQuote } from "@/hooks/useRealtime";
 import { BarChart2, TrendingUp, Activity, Waves, GitBranch } from "lucide-react";
 
-type Period = "D" | "W" | "M";
+type Period = "1" | "5" | "15" | "30" | "60" | "D" | "W" | "M";
 type Indicator = "ma" | "bb" | "volume" | "macd" | "stoch";
+
+const periodOptions: Array<{ value: Period; label: string }> = [
+  { value: "1", label: "1분" },
+  { value: "5", label: "5분" },
+  { value: "15", label: "15분" },
+  { value: "30", label: "30분" },
+  { value: "60", label: "60분" },
+  { value: "D", label: "일" },
+  { value: "W", label: "주" },
+  { value: "M", label: "월" },
+];
 
 interface Props {
   stockCode: string;
@@ -130,6 +141,9 @@ function formatProgramTime(time?: string) {
 }
 
 function toChartTime(date: string): Time {
+  if (date.length >= 12) {
+    return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${date.slice(8, 10)}:${date.slice(10, 12)}:00` as Time;
+  }
   return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}` as Time;
 }
 
@@ -179,6 +193,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
 
   const [period, setPeriod] = useState<Period>("D");
   const [indicators, setIndicators] = useState<Set<Indicator>>(new Set<Indicator>(["ma", "volume"]));
+  const [selectedChartStrategyId, setSelectedChartStrategyId] = useState<string>("bollinger_trading");
   const [crosshairData, setCrosshairData] = useState<{
     time?: string; open?: number; high?: number; low?: number; close?: number; volume?: number;
   }>({});
@@ -186,6 +201,9 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   const { data: kisSettings } = trpc.kis.getSettings.useQuery(undefined, {
     staleTime: 60_000,
   });
+  const { data: allStrategyMeta = [] } = trpc.strategy.getAllMeta.useQuery();
+  const tradingStrategyOptions = allStrategyMeta.filter((meta) => meta.type === "trading");
+  const selectedChartStrategyName = tradingStrategyOptions.find((meta) => meta.id === selectedChartStrategyId)?.name ?? selectedChartStrategyId;
   const isKisActive = Boolean(kisSettings?.isActive);
 
   const { data: ohlcv, isLoading, error: ohlcvError } = trpc.kis.getOHLCV.useQuery(
@@ -199,8 +217,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   );
 
   const { data: strategyAnnotations } = trpc.backtest.getSignalAnnotations.useQuery(
-    { stockCode, period },
-    { enabled: isKisActive && !!stockCode, staleTime: 60_000, retry: false }
+    { stockCode, period, strategyIds: [selectedChartStrategyId] },
+    { enabled: isKisActive && !!stockCode && !!selectedChartStrategyId, staleTime: 60_000, retry: false }
   );
 
   // Realtime tick: subscribe to live price via Socket.IO
@@ -427,7 +445,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
     if (!isKisActive) return;
     if (!ohlcv || !candleSeriesRef.current || !volSeriesRef.current || !chartRef.current) return;
 
-    const times = ohlcv.map((d) => `${d.date.slice(0, 4)}-${d.date.slice(4, 6)}-${d.date.slice(6, 8)}` as Time);
+    const times = ohlcv.map((d) => toChartTime(d.date));
     const closes = ohlcv.map((d) => d.close);
     const highs = ohlcv.map((d) => d.high);
     const lows = ohlcv.map((d) => d.low);
@@ -618,18 +636,33 @@ export default function TradingChart({ stockCode, stockName }: Props) {
         <div className="flex items-center gap-2">
           {/* Period selector */}
           <div className="flex gap-0.5 bg-secondary rounded p-0.5">
-            {(["D", "W", "M"] as Period[]).map((p) => (
+            {periodOptions.map((option) => (
               <button
-                key={p}
-                onClick={() => setPeriod(p)}
+                key={option.value}
+                onClick={() => setPeriod(option.value)}
                 className={`px-2 py-0.5 rounded text-xs transition-colors ${
-                  period === p ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  period === option.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {p === "D" ? "일" : p === "W" ? "주" : "월"}
+                {option.label}
               </button>
             ))}
           </div>
+
+          {/* Strategy overlay selector */}
+          <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span>차트 전략</span>
+            <select
+              value={selectedChartStrategyId}
+              onChange={(event) => setSelectedChartStrategyId(event.target.value)}
+              className="h-6 max-w-[150px] rounded border border-border bg-secondary px-2 text-xs text-foreground outline-none"
+              aria-label="차트에 표시할 전략 선택"
+            >
+              {tradingStrategyOptions.map((meta) => (
+                <option key={meta.id} value={meta.id}>{meta.name}</option>
+              ))}
+            </select>
+          </label>
 
           {/* Indicator toggles */}
           <div className="flex gap-0.5 flex-wrap">
@@ -678,6 +711,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       {isKisActive && strategyAnnotations && (
         <div className="strategy-signal-legend flex items-center gap-3 px-3 py-1 text-[10px] border-b border-border/50 bg-card/40">
           <span className="font-semibold text-foreground">매매신호</span>
+          <span className="text-muted-foreground">{selectedChartStrategyName}</span>
           <span className="text-bull">▲ 매수 {strategyAnnotations.signals.filter((signal) => signal.signal === "BUY").length}</span>
           <span className="text-bear">▼ 청산 {strategyAnnotations.signals.filter((signal) => signal.signal === "SELL").length}</span>
           <span className="text-muted-foreground">패턴선 {strategyAnnotations.patterns.length}</span>

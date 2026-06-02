@@ -7,6 +7,7 @@
 import axios, { AxiosInstance } from "axios";
 
 export type KisMode = "real" | "paper";
+export type KisChartPeriod = "1" | "5" | "15" | "30" | "60" | "D" | "W" | "M";
 
 const KIS_BASE_URL: Record<KisMode, string> = {
   real: "https://openapi.koreainvestment.com:9443",
@@ -193,6 +194,43 @@ export function sanitizeKisApiError(error: unknown): Error {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isMinuteChartPeriod(period: KisChartPeriod): period is "1" | "5" | "15" | "30" | "60" {
+  return ["1", "5", "15", "30", "60"].includes(period);
+}
+
+function normalizeKisDateTime(date: string, time: string): string {
+  const normalizedDate = date.replace(/-/g, "").slice(0, 8);
+  const normalizedTime = time.padStart(6, "0").slice(0, 6);
+  return `${normalizedDate}${normalizedTime.slice(0, 4)}`;
+}
+
+function aggregateMinuteBars(rows: KisOHLCV[], intervalMinutes: number): KisOHLCV[] {
+  if (intervalMinutes <= 1) return rows;
+  const buckets = new Map<string, KisOHLCV[]>();
+  for (const row of rows) {
+    const date = row.date.slice(0, 8);
+    const hour = row.date.slice(8, 10);
+    const minute = Number(row.date.slice(10, 12));
+    const bucketMinute = Math.floor(minute / intervalMinutes) * intervalMinutes;
+    const key = `${date}${hour}${String(bucketMinute).padStart(2, "0")}`;
+    buckets.set(key, [...(buckets.get(key) || []), row]);
+  }
+
+  return Array.from(buckets.entries()).map(([date, bucketRows]) => {
+    const first = bucketRows[0];
+    const last = bucketRows[bucketRows.length - 1];
+    return {
+      date,
+      open: first.open,
+      high: Math.max(...bucketRows.map((row) => row.high)),
+      low: Math.min(...bucketRows.map((row) => row.low)),
+      close: last.close,
+      volume: bucketRows.reduce((sum, row) => sum + row.volume, 0),
+      amount: bucketRows.reduce((sum, row) => sum + row.amount, 0),
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // Conservative token-bucket limiter. KIS may reject bursts even below the documented ceiling,
@@ -389,10 +427,10 @@ export class KisApiClient {
     };
   }
 
-  // 국내주식 일/주/월봉 조회
+  // 국내주식 분/일/주/월봉 조회
   async getOHLCV(
     stockCode: string,
-    period: "D" | "W" | "M" = "D",
+    period: KisChartPeriod = "D",
     startDate?: string,
     endDate?: string
   ): Promise<KisOHLCV[]> {
@@ -403,6 +441,39 @@ export class KisApiClient {
       d.setFullYear(d.getFullYear() - 1);
       return d.toISOString().slice(0, 10).replace(/-/g, "");
     })();
+
+    if (isMinuteChartPeriod(period)) {
+      const hour = `${String(today.getHours()).padStart(2, "0")}${String(today.getMinutes()).padStart(2, "0")}00`;
+      const data = await this.request<{ output2?: Array<Record<string, string>>; output?: Array<Record<string, string>> }>(
+        "GET",
+        "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+        "FHKST03010200",
+        {
+          FID_COND_MRKT_DIV_CODE: "J",
+          FID_INPUT_ISCD: stockCode,
+          FID_INPUT_HOUR_1: hour,
+          FID_PW_DATA_INCU_YN: "Y",
+        }
+      );
+      const tradeDate = end;
+      const rows = (data.output2 || data.output || [])
+        .filter((r) => r.stck_cntg_hour || r.bsop_hour)
+        .map((r) => {
+          const currentPrice = Number(r.stck_prpr || r.stck_clpr || r.prpr || 0);
+          const volume = Number(r.cntg_vol || r.acml_vol || r.trd_vol || 0);
+          return {
+            date: normalizeKisDateTime(r.stck_bsop_date || r.bsop_date || tradeDate, r.stck_cntg_hour || r.bsop_hour || "000000"),
+            open: Number(r.stck_oprc || r.oprc || currentPrice),
+            high: Number(r.stck_hgpr || r.hgpr || currentPrice),
+            low: Number(r.stck_lwpr || r.lwpr || currentPrice),
+            close: currentPrice,
+            volume,
+            amount: Number(r.acml_tr_pbmn || r.tr_pbmn || 0) || currentPrice * volume,
+          };
+        })
+        .sort((a, b) => a.date.localeCompare(b.date));
+      return aggregateMinuteBars(rows, Number(period));
+    }
 
     const trIdMap = { D: "FHKST03010100", W: "FHKST03010100", M: "FHKST03010100" };
     const data = await this.request<{ output2: Array<Record<string, string>> }>(

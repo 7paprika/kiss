@@ -104,4 +104,25 @@ describe("chart compatibility", () => {
     expect(source).toContain("strategy-signal-legend");
   });
 
+  it("filters chart strategy annotations to the one selected by the user", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain("selectedChartStrategyId");
+    expect(source).toContain("차트 전략");
+    expect(source).toContain("strategyIds: [selectedChartStrategyId]");
+    expect(source).not.toContain("{ stockCode, period },\n    { enabled: isKisActive && !!stockCode");
+  });
+
+  it("offers minute chart periods in the chart period selector", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain('type Period = "1" | "5" | "15" | "30" | "60" | "D" | "W" | "M"');
+    expect(source).toContain("periodOptions");
+    expect(source).toContain("1분");
+    expect(source).toContain("5분");
+    expect(source).toContain("15분");
+    expect(source).toContain("30분");
+    expect(source).toContain("60분");
+  });
+
 });

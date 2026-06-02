@@ -234,7 +234,7 @@ const kisRouter = router({
 
   getOHLCV: protectedProcedure.input(z.object({
     stockCode: z.string(),
-    period: z.enum(["D", "W", "M"]).default("D"),
+    period: z.enum(["1", "5", "15", "30", "60", "D", "W", "M"]).default("D"),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
   })).query(async ({ ctx, input }) => {
@@ -609,7 +609,7 @@ const backtestRouter = router({
   run: protectedProcedure.input(z.object({
     stockCode: z.string().min(1),
     strategyId: z.string().min(1),
-    period: z.enum(["D", "W", "M"]).default("D"),
+    period: z.enum(["1", "5", "15", "30", "60", "D", "W", "M"]).default("D"),
     initialCapital: z.number().min(100_000).default(10_000_000),
     stopLossPct: z.number().min(0).max(50).default(0),
     takeProfitPct: z.number().min(0).max(100).default(0),
@@ -641,7 +641,7 @@ const backtestRouter = router({
   // Compare all trading strategies on one stock
   compare: protectedProcedure.input(z.object({
     stockCode: z.string().min(1),
-    period: z.enum(["D", "W", "M"]).default("D"),
+    period: z.enum(["1", "5", "15", "30", "60", "D", "W", "M"]).default("D"),
     initialCapital: z.number().min(100_000).default(10_000_000),
     stopLossPct: z.number().min(0).max(50).default(0),
     takeProfitPct: z.number().min(0).max(100).default(0),
@@ -672,7 +672,7 @@ const backtestRouter = router({
   getHistory: protectedProcedure.input(z.object({ batchId: z.string() })).query(async ({ input }) => getBacktestResultsByBatch(input.batchId)),
   getSignalAnnotations: protectedProcedure.input(z.object({
     stockCode: z.string().min(1),
-    period: z.enum(["D", "W", "M"]).default("D"),
+    period: z.enum(["1", "5", "15", "30", "60", "D", "W", "M"]).default("D"),
     strategyIds: z.array(z.string()).optional(),
   })).query(async ({ ctx, input }) => {
     const client = await initKisClientForUser(ctx.user.id);
@@ -925,7 +925,7 @@ const optimizerRouter = router({
     .input(z.object({
       strategyId: z.string(),
       stockCode: z.string().min(1).max(10),
-      period: z.enum(["D", "W", "M"]).default("D"),
+      period: z.enum(["1", "5", "15", "30", "60", "D", "W", "M"]).default("D"),
       initialCapital: z.number().min(100000).max(1000000000).default(10000000),
       stopLossPct: z.number().min(0).max(50).optional(),
       takeProfitPct: z.number().min(0).max(200).optional(),
