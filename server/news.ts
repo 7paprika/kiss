@@ -1,10 +1,12 @@
+import { inflateRawSync } from "node:zlib";
+
 /**
  * 뉴스·공시 모듈
- * - 네이버 금융 종목 뉴스 RSS 파싱
- * - KRX 공시 정보 (KIND API)
+ * - 네이버 뉴스 검색은 k-skill-proxy의 Naver Open API proxy를 우선 사용
+ * - 공시는 DART OpenAPI 키(API_K_DART 또는 DART_API_KEY)가 있을 때 공식 DART로 조회
  */
 
-interface NewsItem {
+export interface NewsItem {
   title: string;
   link: string;
   description: string;
@@ -13,15 +15,56 @@ interface NewsItem {
   category: "news" | "disclosure";
 }
 
+export interface SourceStatus {
+  ok: boolean;
+  message: string;
+}
+
+export interface NewsResponse {
+  items: NewsItem[];
+  sourceStatus: {
+    news: SourceStatus;
+    disclosure: SourceStatus;
+  };
+}
+
+const DEFAULT_PROXY_BASE = "https://k-skill-proxy.nomadamas.org";
+const DART_CORP_CACHE = new Map<string, { corpCode: string; corpName: string }>();
+
+function decodeHtml(input: string): string {
+  return input
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .trim();
+}
+
+function getProxyBase(): string {
+  return (process.env.KSKILL_PROXY_BASE_URL || DEFAULT_PROXY_BASE).replace(/\/$/, "");
+}
+
+function getDartApiKey(): string | undefined {
+  return process.env.API_K_DART || process.env.DART_API_KEY || process.env.DART_API_TOKEN;
+}
+
+function toKstDateString(daysAgo = 0): string {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000 - daysAgo * 24 * 60 * 60 * 1000);
+  return kst.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
 /**
- * 네이버 금융 종목 뉴스 RSS 파싱
- * URL: https://finance.naver.com/item/news_news.naver?code=XXXXXX&page=1&sm=title_entity_id.basic&clusterId=
- * RSS: https://finance.naver.com/news/news_search.naver?rcdate=&q=XXXXXX&x=0&y=0&sm=top_sise&field=0&sort=0&pd=0&ds=&de=
+ * 네이버 금융 종목 뉴스 HTML 파싱 fallback.
+ * finance.naver.com은 EUC-KR이라 arrayBuffer + TextDecoder가 필요하다.
  */
 export async function fetchStockNews(stockCode: string, limit = 20): Promise<NewsItem[]> {
   try {
-    // 네이버 금융 뉴스 검색 (종목명 검색 방식)
-    const searchUrl = `https://finance.naver.com/item/news_news.naver?code=${stockCode}&page=1`;
+    const searchUrl = `https://finance.naver.com/item/news_news.naver?code=${encodeURIComponent(stockCode)}&page=1`;
     const res = await fetch(searchUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -33,154 +76,166 @@ export async function fetchStockNews(stockCode: string, limit = 20): Promise<New
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const html = await res.text();
+    const html = new TextDecoder("euc-kr").decode(await res.arrayBuffer());
 
-    // HTML 파싱으로 뉴스 추출
     const items: NewsItem[] = [];
-
-    // 뉴스 테이블 행 추출 (td.title > a)
-    const rowRegex = /<td class="title">\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
-    const dateRegex = /<td class="date">([^<]+)<\/td>/g;
-    const sourceRegex = /<td class="info">([^<]+)<\/td>/g;
-
-    const titles: string[] = [];
-    const links: string[] = [];
-    const dates: string[] = [];
-    const sources: string[] = [];
-
+    const rowRegex = /<td class="title">\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<td class="info">([\s\S]*?)<\/td>[\s\S]*?<td class="date">([^<]+)<\/td>/g;
     let m;
-    while ((m = rowRegex.exec(html)) !== null) {
-      links.push(`https://finance.naver.com${m[1]}`);
-      titles.push(m[2].trim());
-    }
-    while ((m = dateRegex.exec(html)) !== null) {
-      dates.push(m[1].trim());
-    }
-    while ((m = sourceRegex.exec(html)) !== null) {
-      sources.push(m[1].trim());
-    }
-
-    for (let i = 0; i < Math.min(titles.length, limit); i++) {
+    while ((m = rowRegex.exec(html)) !== null && items.length < limit) {
+      const rawLink = m[1].startsWith("http") ? m[1] : `https://finance.naver.com${m[1]}`;
       items.push({
-        title: titles[i] || "",
-        link: links[i] || "",
+        title: decodeHtml(m[2]),
+        link: rawLink,
         description: "",
-        pubDate: dates[i] || "",
-        source: sources[i] || "네이버금융",
+        pubDate: m[4].trim(),
+        source: decodeHtml(m[3]) || "네이버금융",
         category: "news",
       });
     }
 
     return items;
   } catch (err) {
-    console.warn("[News] 네이버 금융 뉴스 조회 실패:", err);
+    console.warn("[News] 네이버 금융 종목 뉴스 조회 실패:", err);
     return [];
   }
 }
 
 /**
- * 네이버 금융 RSS 뉴스 (키워드 기반)
- * RSS URL: https://finance.naver.com/news/news_search.naver?rcdate=&q=KEYWORD
+ * 네이버 뉴스 검색 — k-skill-proxy의 Naver Open API proxy를 우선 사용한다.
  */
 export async function fetchNewsRSS(stockCode: string, stockName: string, limit = 15): Promise<NewsItem[]> {
+  const query = stockName || stockCode;
   try {
-    // 네이버 뉴스 RSS - 종목명으로 검색
-    const query = encodeURIComponent(stockName || stockCode);
-    const rssUrl = `https://finance.naver.com/news/news_search.naver?rcdate=&q=${query}&x=0&y=0&sm=top_sise&field=0&sort=0&pd=0&ds=&de=`;
+    const url = new URL(`${getProxyBase()}/v1/naver-news/search`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("display", String(Math.max(1, Math.min(limit, 100))));
+    url.searchParams.set("sort", "date");
 
-    const res = await fetch(rssUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; KISAutoTrader/1.0)",
-        "Accept": "text/html",
-        "Accept-Language": "ko-KR,ko;q=0.9",
-      },
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json" },
       signal: AbortSignal.timeout(8000),
     });
+    if (!res.ok) throw new Error(`proxy HTTP ${res.status}`);
+    const json = await res.json() as { items?: Array<Record<string, unknown>> };
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const html = await res.text();
+    const items = (json.items || []).slice(0, limit).map((item): NewsItem => ({
+      title: String(item.title || ""),
+      link: String(item.link || item.original_link || ""),
+      description: String(item.description || ""),
+      pubDate: String(item.pub_date_iso || item.pub_date || ""),
+      source: "네이버뉴스",
+      category: "news",
+    })).filter(item => item.title && item.link);
 
-    const items: NewsItem[] = [];
-
-    // 뉴스 리스트 파싱
-    const articleRegex = /<dt[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>[\s\S]*?<\/dt>[\s\S]*?<dd[^>]*>([^<]*)<\/dd>[\s\S]*?<dd[^>]*class="[^"]*date[^"]*"[^>]*>([^<]+)<\/dd>/g;
-    let m;
-    while ((m = articleRegex.exec(html)) !== null && items.length < limit) {
-      const rawLink = m[1];
-      const link = rawLink.startsWith("http") ? rawLink : `https://finance.naver.com${rawLink}`;
-      items.push({
-        title: m[2].trim().replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#[0-9]+;/g, ""),
-        link,
-        description: m[3].trim().replace(/<[^>]+>/g, ""),
-        pubDate: m[4].trim(),
-        source: "네이버금융",
-        category: "news",
-      });
-    }
-
-    return items;
+    if (items.length > 0) return items;
   } catch (err) {
-    console.warn("[News] RSS 뉴스 조회 실패:", err);
+    console.warn("[News] k-skill-proxy 네이버 뉴스 조회 실패, 금융 HTML fallback 시도:", err);
+  }
+
+  return fetchStockNews(stockCode, limit);
+}
+
+function extractFirstXmlFromZip(zip: Uint8Array): string {
+  let offset = 0;
+  while (offset + 30 < zip.length) {
+    const signature = zip[offset] | (zip[offset + 1] << 8) | (zip[offset + 2] << 16) | (zip[offset + 3] << 24);
+    if (signature !== 0x04034b50) break;
+    const method = zip[offset + 8] | (zip[offset + 9] << 8);
+    const compressedSize = zip[offset + 18] | (zip[offset + 19] << 8) | (zip[offset + 20] << 16) | (zip[offset + 21] << 24);
+    const uncompressedSize = zip[offset + 22] | (zip[offset + 23] << 8) | (zip[offset + 24] << 16) | (zip[offset + 25] << 24);
+    const fileNameLength = zip[offset + 26] | (zip[offset + 27] << 8);
+    const extraLength = zip[offset + 28] | (zip[offset + 29] << 8);
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + fileNameLength;
+    const dataStart = nameEnd + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    const name = new TextDecoder().decode(zip.slice(nameStart, nameEnd));
+
+    if (name.toLowerCase().endsWith(".xml")) {
+      const data = zip.slice(dataStart, dataEnd);
+      if (method === 0) return new TextDecoder("utf8").decode(data);
+      if (method === 8) return inflateRawSync(data, { finishFlush: 2 }).toString("utf8");
+      throw new Error(`지원하지 않는 ZIP 압축 방식: ${method}`);
+    }
+    offset = dataEnd;
+    if (uncompressedSize < 0) break;
+  }
+  throw new Error("DART corpCode ZIP에서 XML 파일을 찾지 못했습니다.");
+}
+
+async function findDartCorpCode(stockCode: string, stockName: string, apiKey: string): Promise<{ corpCode: string; corpName: string } | null> {
+  const cached = DART_CORP_CACHE.get(stockCode);
+  if (cached) return cached;
+
+  const url = new URL("https://opendart.fss.or.kr/api/corpCode.xml");
+  url.searchParams.set("crtfc_key", apiKey);
+  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  if (!res.ok) throw new Error(`DART corpCode HTTP ${res.status}`);
+
+  const zipped = new Uint8Array(await res.arrayBuffer());
+  const xml = extractFirstXmlFromZip(zipped);
+  const rowRegex = /<list>\s*<corp_code>([^<]+)<\/corp_code>\s*<corp_name>([^<]+)<\/corp_name>\s*<stock_code>([^<]*)<\/stock_code>/g;
+  let m;
+  while ((m = rowRegex.exec(xml)) !== null) {
+    const corpCode = m[1].trim();
+    const corpName = m[2].trim();
+    const listedCode = m[3].trim();
+    if (listedCode === stockCode || (!!stockName && corpName === stockName)) {
+      const found = { corpCode, corpName };
+      DART_CORP_CACHE.set(stockCode, found);
+      return found;
+    }
+  }
+  return null;
+}
+
+export async function fetchKindDisclosures(stockCode: string, limit = 10, stockName = ""): Promise<NewsItem[]> {
+  const apiKey = getDartApiKey();
+  if (!apiKey) return [];
+
+  try {
+    const corp = await findDartCorpCode(stockCode, stockName, apiKey);
+    if (!corp) throw new Error(`DART corp_code not found for ${stockCode}`);
+
+    const url = new URL("https://opendart.fss.or.kr/api/list.json");
+    url.searchParams.set("crtfc_key", apiKey);
+    url.searchParams.set("corp_code", corp.corpCode);
+    url.searchParams.set("bgn_de", toKstDateString(120));
+    url.searchParams.set("end_de", toKstDateString(0));
+    url.searchParams.set("sort", "date");
+    url.searchParams.set("sort_mth", "desc");
+    url.searchParams.set("page_count", String(Math.max(1, Math.min(limit, 100))));
+
+    const res = await fetch(url, { headers: { "Accept": "application/json" }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`DART list HTTP ${res.status}`);
+    const json = await res.json() as { status?: string; message?: string; list?: Array<Record<string, unknown>> };
+
+    if (json.status === "013") return [];
+    if (json.status && json.status !== "000") throw new Error(`DART ${json.status}: ${json.message || "조회 실패"}`);
+
+    return (json.list || []).slice(0, limit).map((item): NewsItem => ({
+      title: String(item.report_nm || ""),
+      link: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${encodeURIComponent(String(item.rcept_no || ""))}`,
+      description: String(item.corp_name || corp.corpName || ""),
+      pubDate: String(item.rcept_dt || ""),
+      source: "DART공시",
+      category: "disclosure",
+    })).filter(item => item.title && item.link);
+  } catch (err) {
+    console.warn("[News] DART 공시 조회 실패:", err);
     return [];
   }
 }
 
-/**
- * KIND(한국거래소 공시) 종목 공시 조회
- * https://kind.krx.co.kr/disclosure/todaydisclosure.do
- */
-export async function fetchKindDisclosures(stockCode: string, limit = 10): Promise<NewsItem[]> {
+async function withStatus<T>(fn: () => Promise<T[]>, unavailableMessage?: string): Promise<{ items: T[]; status: SourceStatus }> {
+  if (unavailableMessage) {
+    return { items: [], status: { ok: false, message: unavailableMessage } };
+  }
   try {
-    const url = `https://kind.krx.co.kr/disclosure/companysearch.do?method=searchTotalInfoMain&searchCodeType=&searchCorpName=&searchCorpCode=${stockCode}&repIsuSrtCd=${stockCode}`;
-
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; KISAutoTrader/1.0)",
-        "Accept": "application/json, text/html",
-        "Referer": "https://kind.krx.co.kr/",
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-
-    const items: NewsItem[] = [];
-
-    // JSON 응답 파싱 시도
-    try {
-      const json = JSON.parse(text);
-      const list = json?.result?.list || json?.list || [];
-      for (const item of list.slice(0, limit)) {
-        items.push({
-          title: item.rptNm || item.title || "",
-          link: `https://kind.krx.co.kr/disclosure/disclosuredetail.do?method=searchDisclosureDetail&acptNo=${item.acptNo}`,
-          description: item.corpNm || "",
-          pubDate: item.acptDt || item.date || "",
-          source: "KIND공시",
-          category: "disclosure",
-        });
-      }
-    } catch {
-      // HTML 파싱 fallback
-      const rowRegex = /<tr[^>]*>\s*<td[^>]*>([^<]*)<\/td>\s*<td[^>]*><a[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a><\/td>/g;
-      let m;
-      while ((m = rowRegex.exec(text)) !== null && items.length < limit) {
-        items.push({
-          title: m[3].trim(),
-          link: m[2].startsWith("http") ? m[2] : `https://kind.krx.co.kr${m[2]}`,
-          description: "",
-          pubDate: m[1].trim(),
-          source: "KIND공시",
-          category: "disclosure",
-        });
-      }
-    }
-
-    return items;
+    const items = await fn();
+    return { items, status: { ok: true, message: items.length > 0 ? "정상 조회" : "조회 결과 없음" } };
   } catch (err) {
-    console.warn("[News] KIND 공시 조회 실패:", err);
-    return [];
+    return { items: [], status: { ok: false, message: err instanceof Error ? err.message : "조회 실패" } };
   }
 }
 
@@ -191,22 +246,28 @@ export async function fetchStockNewsAndDisclosures(
   stockCode: string,
   stockName: string,
   limit = 20
-): Promise<NewsItem[]> {
-  const [news, disclosures] = await Promise.allSettled([
-    fetchNewsRSS(stockCode, stockName, Math.ceil(limit * 0.7)),
-    fetchKindDisclosures(stockCode, Math.ceil(limit * 0.3)),
+): Promise<NewsResponse> {
+  const disclosureUnavailable = getDartApiKey()
+    ? undefined
+    : "DART API 키(API_K_DART 또는 DART_API_KEY)가 없어 공시를 조회할 수 없습니다.";
+
+  const [news, disclosures] = await Promise.all([
+    withStatus(() => fetchNewsRSS(stockCode, stockName, Math.ceil(limit * 0.7))),
+    withStatus(() => fetchKindDisclosures(stockCode, Math.ceil(limit * 0.3), stockName), disclosureUnavailable),
   ]);
 
-  const newsItems = news.status === "fulfilled" ? news.value : [];
-  const disclosureItems = disclosures.status === "fulfilled" ? disclosures.value : [];
-
-  // 날짜 기준 정렬 (최신순)
-  const combined = [...newsItems, ...disclosureItems];
+  const combined = [...news.items, ...disclosures.items];
   combined.sort((a, b) => {
-    const da = new Date(a.pubDate).getTime() || 0;
-    const db = new Date(b.pubDate).getTime() || 0;
+    const da = new Date(a.pubDate).getTime() || Number(String(a.pubDate).replace(/\D/g, "")) || 0;
+    const db = new Date(b.pubDate).getTime() || Number(String(b.pubDate).replace(/\D/g, "")) || 0;
     return db - da;
   });
 
-  return combined.slice(0, limit);
+  return {
+    items: combined.slice(0, limit),
+    sourceStatus: {
+      news: news.status,
+      disclosure: disclosures.status,
+    },
+  };
 }

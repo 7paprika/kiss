@@ -37,18 +37,24 @@ export default function NewsPanel({ stockCode, stockName }: NewsPanelProps) {
     }
   );
 
-  const newsData = stockCode ? data : marketNews.data;
+  const newsResponse = stockCode ? data : marketNews.data;
+  const newsData = newsResponse?.items || [];
+  const sourceStatus = newsResponse?.sourceStatus;
   const loading = stockCode ? isLoading : marketNews.isLoading;
   const fetchError = stockCode ? error : marketNews.error;
   const doRefetch = stockCode ? refetch : marketNews.refetch;
   const fetching = stockCode ? isFetching : marketNews.isFetching;
 
-  const filtered = newsData?.filter(item =>
-    filter === "all" ? true : item.category === filter
-  ) || [];
+  const sourceFailures = sourceStatus
+    ? Object.entries(sourceStatus).filter(([, status]) => !status.ok)
+    : [];
 
-  const newsCount = newsData?.filter(i => i.category === "news").length || 0;
-  const disclosureCount = newsData?.filter(i => i.category === "disclosure").length || 0;
+  const filtered = newsData.filter(item =>
+    filter === "all" ? true : item.category === filter
+  );
+
+  const newsCount = newsData.filter(i => i.category === "news").length;
+  const disclosureCount = newsData.filter(i => i.category === "disclosure").length;
 
   function formatDate(dateStr: string) {
     if (!dateStr) return "";
@@ -71,7 +77,7 @@ export default function NewsPanel({ stockCode, stockName }: NewsPanelProps) {
           <span className="text-sm font-semibold text-foreground">
             {stockCode ? `${stockName || stockCode} 뉴스` : "시장 뉴스"}
           </span>
-          {newsData && (
+          {newsResponse && (
             <span className="text-xs text-muted-foreground">
               ({newsData.length}건)
             </span>
@@ -105,7 +111,7 @@ export default function NewsPanel({ stockCode, stockName }: NewsPanelProps) {
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
             }`}
           >
-            {f === "all" ? `전체 ${newsData ? newsData.length : ""}` :
+            {f === "all" ? `전체 ${newsResponse ? newsData.length : ""}` :
              f === "news" ? `뉴스 ${newsCount || ""}` :
              `공시 ${disclosureCount || ""}`}
           </button>
@@ -147,13 +153,41 @@ export default function NewsPanel({ stockCode, stockName }: NewsPanelProps) {
             </Button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2">
+          <div className="flex flex-col items-center justify-center h-36 gap-2 px-4 text-center">
             <Newspaper className="w-6 h-6 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">뉴스가 없습니다</p>
+            {sourceFailures.length > 0 && (
+              <div className="w-full rounded-md border border-destructive/25 bg-destructive/5 px-2.5 py-2 text-left">
+                <p className="text-[11px] font-medium text-destructive">소스 연동 실패</p>
+                <div className="mt-1 space-y-0.5">
+                  {sourceFailures.map(([key, status]) => (
+                    <p key={key} className="text-[10px] leading-relaxed text-muted-foreground">
+                      {key === "news" ? "뉴스" : "공시"}: {status.message}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="divide-y divide-border/20">
-            {filtered.map((item, idx) => (
+          <>
+            {sourceFailures.length > 0 && (
+              <div className="mx-3 my-2 rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-500">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>연동 상태</span>
+                </div>
+                <div className="mt-1 space-y-0.5">
+                  {sourceFailures.map(([key, status]) => (
+                    <p key={key} className="text-[10px] leading-relaxed text-muted-foreground">
+                      {key === "news" ? "뉴스" : "공시"}: {status.message}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="divide-y divide-border/20">
+              {filtered.map((item, idx) => (
               <a
                 key={idx}
                 href={item.link}
@@ -193,8 +227,9 @@ export default function NewsPanel({ stockCode, stockName }: NewsPanelProps) {
                   </span>
                 </div>
               </a>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
       </ScrollArea>
     </div>
