@@ -135,31 +135,56 @@ export async function fetchNewsRSS(stockCode: string, stockName: string, limit =
   return fetchStockNews(stockCode, limit);
 }
 
+function readUInt16LE(buf: Uint8Array, offset: number): number {
+  return buf[offset] | (buf[offset + 1] << 8);
+}
+
+function readUInt32LE(buf: Uint8Array, offset: number): number {
+  return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
+}
+
 function extractFirstXmlFromZip(zip: Uint8Array): string {
-  let offset = 0;
-  while (offset + 30 < zip.length) {
-    const signature = zip[offset] | (zip[offset + 1] << 8) | (zip[offset + 2] << 16) | (zip[offset + 3] << 24);
-    if (signature !== 0x04034b50) break;
-    const method = zip[offset + 8] | (zip[offset + 9] << 8);
-    const compressedSize = zip[offset + 18] | (zip[offset + 19] << 8) | (zip[offset + 20] << 16) | (zip[offset + 21] << 24);
-    const uncompressedSize = zip[offset + 22] | (zip[offset + 23] << 8) | (zip[offset + 24] << 16) | (zip[offset + 25] << 24);
-    const fileNameLength = zip[offset + 26] | (zip[offset + 27] << 8);
-    const extraLength = zip[offset + 28] | (zip[offset + 29] << 8);
-    const nameStart = offset + 30;
+  let eocdOffset = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65557); i--) {
+    if (readUInt32LE(zip, i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset < 0) throw new Error("DART corpCode ZIP 중앙 디렉터리를 찾지 못했습니다.");
+
+  const entries = readUInt16LE(zip, eocdOffset + 10);
+  let centralOffset = readUInt32LE(zip, eocdOffset + 16);
+
+  for (let i = 0; i < entries && centralOffset + 46 < zip.length; i++) {
+    if (readUInt32LE(zip, centralOffset) !== 0x02014b50) break;
+    const method = readUInt16LE(zip, centralOffset + 10);
+    const compressedSize = readUInt32LE(zip, centralOffset + 20);
+    const fileNameLength = readUInt16LE(zip, centralOffset + 28);
+    const extraLength = readUInt16LE(zip, centralOffset + 30);
+    const commentLength = readUInt16LE(zip, centralOffset + 32);
+    const localOffset = readUInt32LE(zip, centralOffset + 42);
+    const nameStart = centralOffset + 46;
     const nameEnd = nameStart + fileNameLength;
-    const dataStart = nameEnd + extraLength;
-    const dataEnd = dataStart + compressedSize;
     const name = new TextDecoder().decode(zip.slice(nameStart, nameEnd));
 
     if (name.toLowerCase().endsWith(".xml")) {
+      if (readUInt32LE(zip, localOffset) !== 0x04034b50) {
+        throw new Error("DART corpCode ZIP 로컬 헤더가 올바르지 않습니다.");
+      }
+      const localNameLength = readUInt16LE(zip, localOffset + 26);
+      const localExtraLength = readUInt16LE(zip, localOffset + 28);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const dataEnd = dataStart + compressedSize;
       const data = zip.slice(dataStart, dataEnd);
       if (method === 0) return new TextDecoder("utf8").decode(data);
-      if (method === 8) return inflateRawSync(data, { finishFlush: 2 }).toString("utf8");
+      if (method === 8) return inflateRawSync(data).toString("utf8");
       throw new Error(`지원하지 않는 ZIP 압축 방식: ${method}`);
     }
-    offset = dataEnd;
-    if (uncompressedSize < 0) break;
+
+    centralOffset = nameEnd + extraLength + commentLength;
   }
+
   throw new Error("DART corpCode ZIP에서 XML 파일을 찾지 못했습니다.");
 }
 
@@ -174,7 +199,7 @@ async function findDartCorpCode(stockCode: string, stockName: string, apiKey: st
 
   const zipped = new Uint8Array(await res.arrayBuffer());
   const xml = extractFirstXmlFromZip(zipped);
-  const rowRegex = /<list>\s*<corp_code>([^<]+)<\/corp_code>\s*<corp_name>([^<]+)<\/corp_name>\s*<stock_code>([^<]*)<\/stock_code>/g;
+  const rowRegex = /<list>[\s\S]*?<corp_code>([^<]+)<\/corp_code>[\s\S]*?<corp_name>([^<]+)<\/corp_name>[\s\S]*?<stock_code>([^<]*)<\/stock_code>[\s\S]*?<\/list>/g;
   let m;
   while ((m = rowRegex.exec(xml)) !== null) {
     const corpCode = m[1].trim();
