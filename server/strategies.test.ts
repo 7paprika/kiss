@@ -25,18 +25,18 @@ function mockCandidates(count: number, trend: "up" | "down" | "flat" = "flat") {
 }
 
 describe("Strategy Engine", () => {
-  it("getAllStrategyMeta returns at least 14 strategies (7 selection + 7 trading)", () => {
+  it("getAllStrategyMeta returns at least 15 strategies (7 selection + 8 trading)", () => {
     const metas = getAllStrategyMeta();
-    // 7 selection + 7 trading (5 original + 2 new: macd, stochastic)
-    expect(metas.length).toBeGreaterThanOrEqual(14);
+    // 7 selection + 8 trading (includes triangle reversion trading)
+    expect(metas.length).toBeGreaterThanOrEqual(15);
   });
 
-  it("has at least 7 selection strategies and at least 7 trading strategies", () => {
+  it("has at least 7 selection strategies and at least 8 trading strategies", () => {
     const metas = getAllStrategyMeta();
     const selection = metas.filter((m) => m.type === "selection");
     const trading = metas.filter((m) => m.type === "trading");
     expect(selection.length).toBeGreaterThanOrEqual(7);
-    expect(trading.length).toBeGreaterThanOrEqual(7);
+    expect(trading.length).toBeGreaterThanOrEqual(8);
   });
 
   it("each strategy has required fields", () => {
@@ -157,6 +157,67 @@ describe("Strategy Engine", () => {
     const result = strategy.evaluate(data, strategy.meta.defaultParams);
     expect(result.signal).toMatch(/^(BUY|SELL|HOLD)$/);
     expect(typeof result.strength).toBe("number");
+  });
+
+  it("trading strategy: triangle_reversion_trading buys when downside breakout returns to triangle midpoint", () => {
+    const strategy = getTradingStrategy("triangle_reversion_trading");
+    expect(strategy).toBeDefined();
+    if (!strategy) return;
+
+    const data = [
+      ...Array.from({ length: 20 }, (_, i) => {
+        const upper = 120_000 - i * 1_000;
+        const lower = 80_000 + i * 1_000;
+        const close = (upper + lower) / 2;
+        return {
+          date: `202401${String(i + 1).padStart(2, "0")}`,
+          open: close,
+          high: upper,
+          low: lower,
+          close,
+          volume: 1_000_000,
+          amount: close * 1_000_000,
+        };
+      }),
+      { date: "20240121", open: 99_000, high: 100_000, low: 94_000, close: 95_000, volume: 1_600_000, amount: 95_000 * 1_600_000 },
+      { date: "20240122", open: 96_000, high: 101_000, low: 95_000, close: 100_000, volume: 1_400_000, amount: 100_000 * 1_400_000 },
+    ];
+
+    const result = strategy.evaluate(data, strategy.meta.defaultParams);
+    expect(result.signal).toBe("BUY");
+    expect(result.strength).toBeGreaterThanOrEqual(0.6);
+    expect(result.reason).toContain("하방 이탈 후 중단부 회귀");
+    expect(result.indicators?.midpoint).toBeCloseTo(100_000, 0);
+  });
+
+  it("trading strategy: triangle_reversion_trading sells when upside breakout returns to triangle midpoint", () => {
+    const strategy = getTradingStrategy("triangle_reversion_trading");
+    expect(strategy).toBeDefined();
+    if (!strategy) return;
+
+    const data = [
+      ...Array.from({ length: 20 }, (_, i) => {
+        const upper = 120_000 - i * 1_000;
+        const lower = 80_000 + i * 1_000;
+        const close = (upper + lower) / 2;
+        return {
+          date: `202402${String(i + 1).padStart(2, "0")}`,
+          open: close,
+          high: upper,
+          low: lower,
+          close,
+          volume: 1_000_000,
+          amount: close * 1_000_000,
+        };
+      }),
+      { date: "20240221", open: 101_000, high: 106_000, low: 100_000, close: 105_000, volume: 1_600_000, amount: 105_000 * 1_600_000 },
+      { date: "20240222", open: 104_000, high: 105_000, low: 99_000, close: 100_000, volume: 1_400_000, amount: 100_000 * 1_400_000 },
+    ];
+
+    const result = strategy.evaluate(data, strategy.meta.defaultParams);
+    expect(result.signal).toBe("SELL");
+    expect(result.strength).toBeGreaterThanOrEqual(0.6);
+    expect(result.reason).toContain("상방 이탈 후 중단부 회귀");
   });
 });
 

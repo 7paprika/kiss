@@ -766,6 +766,121 @@ export const stochasticTradingStrategy: ITradingStrategy = {
   },
 };
 
+// ─── Strategy 8: Triangle Convergence Midpoint Reversion (삼수 매매) ─────────────
+// Trading: When a clear contracting triangle breaks out and then returns to the
+// triangle midpoint, trade the counter-move with tight invalidation.
+
+function calcLinearRegression(values: number[]): { slope: number; intercept: number } {
+  const n = values.length;
+  const sumX = values.reduce((sum, _v, i) => sum + i, 0);
+  const sumY = values.reduce((sum, v) => sum + v, 0);
+  const sumXY = values.reduce((sum, v, i) => sum + i * v, 0);
+  const sumXX = values.reduce((sum, _v, i) => sum + i * i, 0);
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return { slope: 0, intercept: values[0] ?? 0 };
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  return { slope, intercept: (sumY - slope * sumX) / n };
+}
+
+function projectLine(line: { slope: number; intercept: number }, index: number): number {
+  return line.slope * index + line.intercept;
+}
+
+export const triangleReversionTradingStrategy: ITradingStrategy = {
+  meta: {
+    id: "triangle_reversion_trading",
+    name: "삼각수렴 회귀 매매",
+    description: "삼각수렴 이탈 후 가격이 수렴 중단부로 되돌아오는 구간에서 이탈 방향의 반대 신호를 내는 단기 평균회귀 전략입니다.",
+    type: "trading",
+    defaultParams: { patternBars: 20, breakoutPct: 0.02, returnTolerancePct: 0.01, minContractionRatio: 0.5, stopBufferPct: 0.005 },
+    paramSchema: [
+      { key: "patternBars", label: "수렴 확인 봉 수", type: "number", min: 10, max: 60, step: 1 },
+      { key: "breakoutPct", label: "이탈 확인 비율", type: "number", min: 0.005, max: 0.08, step: 0.005 },
+      { key: "returnTolerancePct", label: "중단부 회귀 허용폭", type: "number", min: 0.002, max: 0.05, step: 0.002 },
+      { key: "minContractionRatio", label: "최소 수렴 축소율", type: "number", min: 0.2, max: 0.9, step: 0.05 },
+      { key: "stopBufferPct", label: "손절 버퍼", type: "number", min: 0.001, max: 0.03, step: 0.001 },
+    ],
+    reference: "Triangle/consolidation breakout pullback mean-reversion rule; discretionary '삼수 매매' pattern",
+  },
+  evaluate(ohlcv, params) {
+    const patternBars = Number(params.patternBars) || 20;
+    const breakoutPct = Number(params.breakoutPct) || 0.02;
+    const returnTolerancePct = Number(params.returnTolerancePct) || 0.01;
+    const minContractionRatio = Number(params.minContractionRatio) || 0.5;
+    const stopBufferPct = Number(params.stopBufferPct) || 0.005;
+
+    if (ohlcv.length < patternBars + 2) return { signal: "HOLD", strength: 0, reason: "데이터 부족" };
+
+    const pattern = ohlcv.slice(-(patternBars + 2), -2);
+    const breakoutBar = ohlcv[ohlcv.length - 2];
+    const returnBar = ohlcv[ohlcv.length - 1];
+
+    const upperLine = calcLinearRegression(pattern.map(d => d.high));
+    const lowerLine = calcLinearRegression(pattern.map(d => d.low));
+    const upperStart = projectLine(upperLine, 0);
+    const lowerStart = projectLine(lowerLine, 0);
+    const upperEnd = projectLine(upperLine, patternBars - 1);
+    const lowerEnd = projectLine(lowerLine, patternBars - 1);
+    const widthStart = Math.abs(upperStart - lowerStart);
+    const widthEnd = Math.abs(upperEnd - lowerEnd);
+
+    const isContracting = upperLine.slope < 0 && lowerLine.slope > 0 && widthStart > 0 && widthEnd / widthStart <= minContractionRatio;
+    if (!isContracting) {
+      return {
+        signal: "HOLD",
+        strength: 0.2,
+        reason: "뚜렷한 삼각수렴 아님",
+        indicators: { upperSlope: upperLine.slope, lowerSlope: lowerLine.slope, widthStart, widthEnd } as Record<string, number>,
+      };
+    }
+
+    const breakoutIndex = patternBars;
+    const returnIndex = patternBars + 1;
+    const upperAtBreakout = projectLine(upperLine, breakoutIndex);
+    const lowerAtBreakout = projectLine(lowerLine, breakoutIndex);
+    const upperAtReturn = projectLine(upperLine, returnIndex);
+    const lowerAtReturn = projectLine(lowerLine, returnIndex);
+    const midpoint = (upperAtReturn + lowerAtReturn) / 2;
+    const returnDistance = midpoint > 0 ? Math.abs(returnBar.close - midpoint) / midpoint : Infinity;
+    const returnedToMidpoint = returnDistance <= returnTolerancePct;
+
+    const brokeUp = breakoutBar.close >= upperAtBreakout * (1 + breakoutPct);
+    const brokeDown = breakoutBar.close <= lowerAtBreakout * (1 - breakoutPct);
+
+    const contractionScore = Math.max(0, Math.min(1, 1 - widthEnd / widthStart));
+    const returnScore = Math.max(0, Math.min(1, 1 - returnDistance / returnTolerancePct));
+    const strength = Math.min(0.95, 0.6 + contractionScore * 0.25 + returnScore * 0.15);
+
+    if (brokeDown && returnedToMidpoint) {
+      const stopLoss = breakoutBar.low * (1 - stopBufferPct);
+      return {
+        signal: "BUY",
+        strength,
+        reason: `하방 이탈 후 중단부 회귀 (중단부: ${midpoint.toFixed(0)}, 손절 기준: ${stopLoss.toFixed(0)})`,
+        indicators: { midpoint, returnDistance, upperAtBreakout, lowerAtBreakout, stopLoss, breakoutDirection: -1 } as Record<string, number>,
+      };
+    }
+
+    if (brokeUp && returnedToMidpoint) {
+      const stopLoss = breakoutBar.high * (1 + stopBufferPct);
+      return {
+        signal: "SELL",
+        strength,
+        reason: `상방 이탈 후 중단부 회귀 (중단부: ${midpoint.toFixed(0)}, 손절 기준: ${stopLoss.toFixed(0)})`,
+        indicators: { midpoint, returnDistance, upperAtBreakout, lowerAtBreakout, stopLoss, breakoutDirection: 1 } as Record<string, number>,
+      };
+    }
+
+    const breakoutText = brokeUp ? "상방 이탈" : brokeDown ? "하방 이탈" : "이탈 미확인";
+    return {
+      signal: "HOLD",
+      strength: 0.3,
+      reason: `${breakoutText}, 중단부 회귀 대기 (거리 ${(returnDistance * 100).toFixed(2)}%)`,
+      indicators: { midpoint, returnDistance, upperAtBreakout, lowerAtBreakout, breakoutDirection: brokeUp ? 1 : brokeDown ? -1 : 0 } as Record<string, number>,
+    };
+  },
+};
+
 // ─── Strategy Registry ────────────────────────────────────────────────────────
 
 export const SELECTION_STRATEGIES: ISelectionStrategy[] = [
@@ -786,6 +901,7 @@ export const TRADING_STRATEGIES: ITradingStrategy[] = [
   weekHigh52TradingStrategy,
   macdTradingStrategy,
   stochasticTradingStrategy,
+  triangleReversionTradingStrategy,
 ];
 
 export function getSelectionStrategy(id: string): ISelectionStrategy | undefined {

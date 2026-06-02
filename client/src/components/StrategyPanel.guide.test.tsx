@@ -19,6 +19,7 @@ const strategyIds = [
   "macd_trading",
   "stochastic_selection",
   "stochastic_trading",
+  "triangle_reversion_trading",
 ];
 
 describe("StrategyPanel strategy guide popovers", () => {
