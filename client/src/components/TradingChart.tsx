@@ -621,14 +621,14 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   return (
     <div className="flex flex-col h-full">
       {/* Chart Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div>
+      <div className="flex flex-col gap-2 px-3 py-2 border-b border-border md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="min-w-0">
             <span className="font-semibold text-sm">{stockName}</span>
             <span className="text-muted-foreground text-xs ml-2">{stockCode}</span>
           </div>
           {displayData.close && (
-            <div className="flex items-center gap-3 font-mono text-xs">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
               <span className={`text-base font-bold ${isUp ? "text-bull" : "text-bear"}`}>
                 {displayData.close.toLocaleString()}
               </span>
@@ -642,9 +642,9 @@ export default function TradingChart({ stockCode, stockName }: Props) {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end">
           {/* Period selector */}
-          <div className="flex gap-0.5 bg-secondary rounded p-0.5">
+          <div className="flex flex-wrap gap-0.5 bg-secondary rounded p-0.5">
             {periodOptions.map((option) => (
               <button
                 key={option.value}
@@ -659,7 +659,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
           </div>
 
           {/* Data overlay switches */}
-          <div className="flex items-center gap-1 rounded bg-secondary/60 px-1.5 py-0.5">
+          <div className="grid w-full grid-cols-2 gap-1 rounded bg-secondary/60 p-1 sm:w-auto md:flex md:items-center">
             {[
               {
                 label: "프로그램",
@@ -681,15 +681,15 @@ export default function TradingChart({ stockCode, stockName }: Props) {
                 aria-checked={item.checked}
                 aria-label={item.ariaLabel}
                 onClick={item.onChange}
-                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                className="inline-flex min-h-[32px] min-w-0 items-center justify-center gap-1 rounded px-2 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground md:min-h-[24px] md:text-[10px]"
                 title={item.ariaLabel}
               >
-                <span>{item.label}</span>
-                <span className={`relative inline-flex h-4 w-7 items-center rounded-full border transition-colors ${
+                <span className="whitespace-nowrap">{item.label}</span>
+                <span className={`relative inline-flex h-[20px] w-[36px] shrink-0 items-center rounded-full border transition-colors md:h-[16px] md:w-[28px] ${
                   item.checked ? "border-primary/50 bg-primary/30" : "border-border bg-card"
                 }`}>
-                  <span className={`inline-block h-3 w-3 rounded-full bg-foreground transition-transform ${
-                    item.checked ? "translate-x-3.5" : "translate-x-0.5 bg-muted-foreground"
+                  <span className={`inline-block h-[16px] w-[16px] rounded-full bg-foreground transition-transform md:h-[12px] md:w-[12px] ${
+                    item.checked ? "translate-x-[16px] md:translate-x-[14px]" : "translate-x-[2px] bg-muted-foreground"
                   }`} />
                 </span>
               </button>
@@ -697,13 +697,13 @@ export default function TradingChart({ stockCode, stockName }: Props) {
           </div>
 
           {/* Strategy overlay selector */}
-          <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <label className="flex min-w-0 flex-1 items-center gap-1 text-[10px] text-muted-foreground sm:flex-none">
             <span>차트 전략</span>
             <select
               value={selectedChartStrategyId}
               onChange={(event) => setSelectedChartStrategyId(event.target.value)}
               disabled={!showStrategySignals}
-              className="h-6 max-w-[150px] rounded border border-border bg-secondary px-2 text-xs text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-7 min-w-0 max-w-[150px] flex-1 rounded border border-border bg-secondary px-2 text-xs text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50 sm:h-6 sm:flex-none"
               aria-label="차트에 표시할 전략 선택"
             >
               {tradingStrategyOptions.map((meta) => (
@@ -713,7 +713,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
           </label>
 
           {/* Indicator toggles */}
-          <div className="flex gap-0.5 flex-wrap">
+          <div className="flex flex-wrap gap-0.5">
             {[
               { key: "ma" as Indicator, label: "MA", icon: <TrendingUp size={10} />, activeClass: "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30", title: "이동평균선" },
               { key: "bb" as Indicator, label: "BB", icon: <Activity size={10} />, activeClass: "bg-blue-500/20 text-blue-400 border border-blue-500/30", title: "볼린저밴드" },
@@ -724,7 +724,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
               <button
                 key={key}
                 onClick={() => toggleIndicator(key)}
-                className={`px-2 py-0.5 rounded text-xs transition-colors flex items-center gap-1 ${
+                className={`inline-flex min-h-[28px] items-center gap-1 rounded px-2 py-0.5 text-xs transition-colors ${
                   indicators.has(key) ? activeClass : "text-muted-foreground hover:text-foreground"
                 }`}
                 title={title}

@@ -126,6 +126,18 @@ describe("chart compatibility", () => {
     expect(source).toContain("showProgramTrading && isKisActive");
   });
 
+  it("keeps data overlay switches separated and touchable on narrow chart headers", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain("flex flex-col gap-2 px-3 py-2 border-b border-border md:flex-row");
+    expect(source).toContain("grid w-full grid-cols-2 gap-1 rounded bg-secondary/60 p-1 sm:w-auto md:flex");
+    expect(source).toContain("inline-flex min-h-[32px] min-w-0 items-center justify-center gap-1");
+    expect(source).toContain("h-[20px] w-[36px] shrink-0");
+    expect(source).toContain("md:h-[16px] md:w-[28px]");
+    expect(source).toContain("md:min-h-[24px] md:text-[10px]");
+    expect(source).toContain("inline-flex min-h-[28px] items-center gap-1");
+  });
+
   it("offers minute chart periods in the chart period selector", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
 
