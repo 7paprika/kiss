@@ -113,6 +113,19 @@ describe("chart compatibility", () => {
     expect(source).not.toContain("{ stockCode, period },\n    { enabled: isKisActive && !!stockCode");
   });
 
+  it("offers switches to independently toggle program trading history and strategy signal overlays", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
+
+    expect(source).toContain("showProgramTrading");
+    expect(source).toContain("showStrategySignals");
+    expect(source).toContain("ariaLabel: \"프로그램 매매 내역 표시 전환\"");
+    expect(source).toContain("ariaLabel: \"전략 신호 표시 전환\"");
+    expect(source).toContain("enabled: isKisActive && !!stockCode && showProgramTrading");
+    expect(source).toContain("enabled: isKisActive && !!stockCode && !!selectedChartStrategyId && showStrategySignals");
+    expect(source).toContain("showStrategySignals && isKisActive && strategyAnnotations");
+    expect(source).toContain("showProgramTrading && isKisActive");
+  });
+
   it("offers minute chart periods in the chart period selector", () => {
     const source = readFileSync(resolve(process.cwd(), "client/src/components/TradingChart.tsx"), "utf8");
 

@@ -194,6 +194,8 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   const [period, setPeriod] = useState<Period>("D");
   const [indicators, setIndicators] = useState<Set<Indicator>>(new Set<Indicator>(["ma", "volume"]));
   const [selectedChartStrategyId, setSelectedChartStrategyId] = useState<string>("bollinger_trading");
+  const [showProgramTrading, setShowProgramTrading] = useState(true);
+  const [showStrategySignals, setShowStrategySignals] = useState(true);
   const [crosshairData, setCrosshairData] = useState<{
     time?: string; open?: number; high?: number; low?: number; close?: number; volume?: number;
   }>({});
@@ -213,12 +215,12 @@ export default function TradingChart({ stockCode, stockName }: Props) {
 
   const { data: programTrade, isLoading: isProgramTradeLoading, error: programTradeError } = trpc.kis.getProgramTradeByStock.useQuery(
     { stockCode },
-    { enabled: isKisActive && !!stockCode, staleTime: 30_000, retry: false }
+    { enabled: isKisActive && !!stockCode && showProgramTrading, staleTime: 30_000, retry: false }
   );
 
   const { data: strategyAnnotations } = trpc.backtest.getSignalAnnotations.useQuery(
     { stockCode, period, strategyIds: [selectedChartStrategyId] },
-    { enabled: isKisActive && !!stockCode && !!selectedChartStrategyId, staleTime: 60_000, retry: false }
+    { enabled: isKisActive && !!stockCode && !!selectedChartStrategyId && showStrategySignals, staleTime: 60_000, retry: false }
   );
 
   // Realtime tick: subscribe to live price via Socket.IO
@@ -564,6 +566,13 @@ export default function TradingChart({ stockCode, stockName }: Props) {
   useEffect(() => {
     if (!isKisActive || !chartRef.current || !candleSeriesRef.current) return;
 
+    if (!showStrategySignals) {
+      strategyMarkersRef.current?.setMarkers([]);
+      patternSeriesRefs.current.forEach((series) => chartRef.current?.removeSeries(series));
+      patternSeriesRefs.current.clear();
+      return;
+    }
+
     if (!strategyMarkersRef.current) {
       strategyMarkersRef.current = createSeriesMarkers(candleSeriesRef.current, []);
     }
@@ -591,7 +600,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
         patternSeriesRefs.current.set(`${pattern.strategyId}-${patternIndex}-${segmentIndex}`, series);
       });
     });
-  }, [isKisActive, strategyAnnotations]);
+  }, [isKisActive, strategyAnnotations, showStrategySignals]);
 
   const last = ohlcv?.[ohlcv.length - 1];
   const prev = ohlcv?.[ohlcv.length - 2];
@@ -649,13 +658,52 @@ export default function TradingChart({ stockCode, stockName }: Props) {
             ))}
           </div>
 
+          {/* Data overlay switches */}
+          <div className="flex items-center gap-1 rounded bg-secondary/60 px-1.5 py-0.5">
+            {[
+              {
+                label: "프로그램",
+                checked: showProgramTrading,
+                onChange: () => setShowProgramTrading((value) => !value),
+                ariaLabel: "프로그램 매매 내역 표시 전환",
+              },
+              {
+                label: "신호",
+                checked: showStrategySignals,
+                onChange: () => setShowStrategySignals((value) => !value),
+                ariaLabel: "전략 신호 표시 전환",
+              },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="switch"
+                aria-checked={item.checked}
+                aria-label={item.ariaLabel}
+                onClick={item.onChange}
+                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+                title={item.ariaLabel}
+              >
+                <span>{item.label}</span>
+                <span className={`relative inline-flex h-4 w-7 items-center rounded-full border transition-colors ${
+                  item.checked ? "border-primary/50 bg-primary/30" : "border-border bg-card"
+                }`}>
+                  <span className={`inline-block h-3 w-3 rounded-full bg-foreground transition-transform ${
+                    item.checked ? "translate-x-3.5" : "translate-x-0.5 bg-muted-foreground"
+                  }`} />
+                </span>
+              </button>
+            ))}
+          </div>
+
           {/* Strategy overlay selector */}
           <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <span>차트 전략</span>
             <select
               value={selectedChartStrategyId}
               onChange={(event) => setSelectedChartStrategyId(event.target.value)}
-              className="h-6 max-w-[150px] rounded border border-border bg-secondary px-2 text-xs text-foreground outline-none"
+              disabled={!showStrategySignals}
+              className="h-6 max-w-[150px] rounded border border-border bg-secondary px-2 text-xs text-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="차트에 표시할 전략 선택"
             >
               {tradingStrategyOptions.map((meta) => (
@@ -708,7 +756,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
         </div>
       )}
 
-      {isKisActive && strategyAnnotations && (
+      {showStrategySignals && isKisActive && strategyAnnotations && (
         <div className="strategy-signal-legend flex items-center gap-3 px-3 py-1 text-[10px] border-b border-border/50 bg-card/40">
           <span className="font-semibold text-foreground">매매신호</span>
           <span className="text-muted-foreground">{selectedChartStrategyName}</span>
@@ -720,7 +768,7 @@ export default function TradingChart({ stockCode, stockName }: Props) {
       )}
 
       {/* Program Trading Card */}
-      {isKisActive && (
+      {showProgramTrading && isKisActive && (
         <div className="border-b border-border/50 bg-secondary/20 px-3 py-2">
           <div className="flex items-center justify-between gap-3 mb-2">
             <div className="flex items-center gap-2">
